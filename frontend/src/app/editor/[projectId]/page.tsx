@@ -32,7 +32,7 @@ export default function EditorPage() {
   const [activeTab, setActiveTab] = useState<EditorTab>('strategy');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration] = useState(60000);
+  const [duration] = useState(30000);
   const [zoom, setZoom] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
 
@@ -445,7 +445,7 @@ export default function EditorPage() {
 
       // If the AI returned operations, push them as a commit to the edit stack
       if (result.operations && result.operations.length > 0) {
-        const dur = effectiveDuration || 60000;
+        const dur = effectiveDuration || 30000;
         const newOps = result.operations
           .filter((op: any) => op.type !== 'reset_all') // filter stray reset_all
           .map((op: any) => {
@@ -854,10 +854,10 @@ export default function EditorPage() {
         {/* Preview Panel */}
         <div className="flex-1 flex flex-col min-h-0">
           {/* Video Preview */}
-          <div className="flex-1 bg-black flex items-center justify-center relative min-h-[300px]">
+          <div className="flex-1 bg-black flex items-center justify-center relative min-h-[400px]">
             {videoUrl ? (
               /* Uploaded video player */
-              <div className="aspect-[9/16] max-h-full max-w-full bg-surface-2 rounded-lg relative overflow-hidden" style={{ height: '95%' }}>
+              <div className="aspect-[9/16] max-h-full max-w-full bg-surface-2 rounded-lg relative overflow-hidden" style={{ height: '100%' }}>
                 <video
                   ref={videoRef}
                   src={videoUrl}
@@ -948,7 +948,7 @@ export default function EditorPage() {
               /* Upload area */
               <div
                 className="aspect-[9/16] max-h-full max-w-full bg-surface-2 rounded-lg flex items-center justify-center relative overflow-hidden cursor-pointer group"
-                style={{ height: '95%' }}
+                style={{ height: '100%' }}
                 onClick={() => fileInputRef.current?.click()}
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
@@ -1706,10 +1706,10 @@ export default function EditorPage() {
       {/* Share / Post Modal */}
       {showShareModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowShareModal(false)}>
-          <div className="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-lg mx-4 p-6 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold text-white">Publish Your Short</h2>
-              <button onClick={() => setShowShareModal(false)} className="text-dark-400 hover:text-white transition-colors text-xl leading-none">&times;</button>
+          <div className="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-[95vw] sm:max-w-lg mx-2 sm:mx-4 p-4 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4 sm:mb-5">
+              <h2 className="text-base sm:text-lg font-bold text-white">Publish Your Short</h2>
+              <button onClick={() => setShowShareModal(false)} className="text-dark-400 hover:text-white transition-colors text-xl leading-none p-1">&times;</button>
             </div>
 
             {editedDurationMs > 0 && editedDurationMs < effectiveDuration && (
@@ -1720,7 +1720,7 @@ export default function EditorPage() {
             )}
 
             {/* Title & Description */}
-            <div className="space-y-3 mb-5">
+            <div className="space-y-3 mb-4 sm:mb-5">
               <div>
                 <label className="block text-xs font-medium text-white/50 mb-1.5">Title *</label>
                 <input
@@ -1746,9 +1746,9 @@ export default function EditorPage() {
               </div>
             </div>
 
-            <p className="text-dark-400 text-xs mb-3 font-medium uppercase tracking-wide">Publish to</p>
+            <p className="text-dark-400 text-xs mb-2 sm:mb-3 font-medium uppercase tracking-wide">Publish to</p>
 
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               {/* Platform cards — data-driven */}
               {([
                 {
@@ -1785,28 +1785,28 @@ export default function EditorPage() {
                 const error = publishErrors[platform.key];
 
                 return (
-                  <div key={platform.key} className={`p-3 rounded-xl bg-dark-700/60 border border-dark-600 ${platform.hoverBorder} transition-colors`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-lg ${platform.iconBg} flex items-center justify-center`}>
+                  <div key={platform.key} className={`p-2.5 sm:p-3 rounded-xl bg-dark-700/60 border border-dark-600 ${platform.hoverBorder} transition-colors`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                        <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg ${platform.iconBg} flex items-center justify-center shrink-0`}>
                           {platform.icon}
                         </div>
-                        <div>
-                          <p className="text-white text-sm font-semibold">{platform.name}</p>
-                          <p className="text-dark-400 text-xs">
+                        <div className="min-w-0">
+                          <p className="text-white text-xs sm:text-sm font-semibold truncate">{platform.name}</p>
+                          <p className="text-dark-400 text-[10px] sm:text-xs truncate">
                             {connected ? <span className="text-emerald-400">@{connectedAccounts[platform.key]}</span> : platform.subtitle}
                           </p>
                         </div>
                       </div>
                       {!connected ? (
-                        <span className="text-[10px] text-dark-400 border border-dark-600 px-2 py-1 rounded-md">Not connected</span>
+                        <span className="text-[10px] text-dark-400 border border-dark-600 px-2 py-1 rounded-md whitespace-nowrap shrink-0">Not connected</span>
                       ) : status === 'done' ? (
-                        <span className="text-xs font-semibold px-4 py-1.5 rounded-lg bg-green-600 text-white">✓ Published</span>
+                        <span className="text-[10px] sm:text-xs font-semibold px-3 sm:px-4 py-1.5 rounded-lg bg-green-600 text-white whitespace-nowrap shrink-0">✓ Published</span>
                       ) : (
                         <button
                           onClick={() => handlePublish(platform.key)}
                           disabled={!postTitle.trim() || status === 'posting'}
-                          className={`text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                          className={`text-[10px] sm:text-xs font-semibold px-3 sm:px-4 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap shrink-0 ${
                             status === 'posting' ? 'bg-dark-600 text-dark-400 cursor-wait' : platform.btnClass
                           }`}
                         >

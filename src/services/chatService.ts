@@ -119,8 +119,9 @@ export class ChatService {
 
     // Add context to system prompt if available
     let systemPrompt = SYSTEM_PROMPT;
-    const videoDur = context?.videoDurationMs ?? 60000;
+    const videoDur = context?.videoDurationMs ?? 30000;
     systemPrompt += `\n\nThe current video is ${videoDur}ms (${(videoDur / 1000).toFixed(1)} seconds) long. ALL timestamps MUST be between 0 and ${videoDur}. NEVER exceed ${videoDur}ms.`;
+    systemPrompt += `\nIMPORTANT: The final edited video MUST always be at most 30 seconds (30000ms) long. If the video is longer than 30s, you MUST include cut operations to bring it down to exactly 30s. This is a hard requirement.`;
     if (context?.platform) {
       systemPrompt += `\nTarget platform: ${context.platform}. Optimize edits for this platform's style and audience.`;
     }
@@ -179,6 +180,17 @@ export class ChatService {
         const targetMs = parseInt(targetMatch[1], 10) * 1000;
         if (targetMs > 0 && targetMs < videoDur) {
           result.operations = this.enforceTargetDuration(result.operations, videoDur, targetMs);
+        }
+      }
+
+      // Always enforce 30s cap: if video is longer and no cuts bring it down, auto-trim
+      if (videoDur > 30000 && result.operations.length > 0) {
+        const cutMs = result.operations
+          .filter((op: any) => op.type === 'cut' || op.type === 'trim_start' || op.type === 'trim_end')
+          .reduce((sum: number, op: any) => sum + ((op.endMs ?? 0) - (op.startMs ?? 0)), 0);
+        const remaining = videoDur - cutMs;
+        if (remaining > 30000) {
+          result.operations = this.enforceTargetDuration(result.operations, videoDur, 30000);
         }
       }
 
