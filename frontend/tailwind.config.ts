@@ -10,16 +10,16 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          50: '#f0f0ff',
-          100: '#e0e0ff',
-          200: '#c4b5fd',
-          300: '#a78bfa',
-          400: '#8b5cf6',
-          500: '#7c3aed',
-          600: '#6d28d9',
-          700: '#5b21b6',
-          800: '#4c1d95',
-          900: '#3b0e7e',
+          50: '#eff6ff',
+          100: '#dbeafe',
+          200: '#93c5fd',
+          300: '#60a5fa',
+          400: '#3b82f6',
+          500: '#2563eb',
+          600: '#1d4ed8',
+          700: '#1e40af',
+          800: '#1e3a8a',
+          900: '#172554',
         },
         surface: {
           0: '#0a0a0f',
@@ -57,8 +57,8 @@ const config: Config = {
           '100%': { opacity: '1' },
         },
         glow: {
-          '0%': { boxShadow: '0 0 5px rgba(124, 58, 237, 0.2)' },
-          '100%': { boxShadow: '0 0 20px rgba(124, 58, 237, 0.4)' },
+          '0%': { boxShadow: '0 0 5px rgba(37, 99, 235, 0.2)' },
+          '100%': { boxShadow: '0 0 20px rgba(37, 99, 235, 0.4)' },
         },
       },
     },
