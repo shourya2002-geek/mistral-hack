@@ -528,6 +528,142 @@ export async function registerCreatorRoutes(app: FastifyInstance): Promise<void>
 }
 
 // ---------------------------------------------------------------------------
+// Publishing routes — connect accounts & publish to platforms
+// ---------------------------------------------------------------------------
+
+// In-memory store for connected accounts & publish jobs
+const connectedAccounts = new Map<string, Map<string, { platform: string; handle: string; connectedAt: number }>>();
+const publishJobs = new Map<string, {
+  id: string;
+  creatorId: string;
+  platform: string;
+  projectId: string;
+  title: string;
+  description: string;
+  status: 'queued' | 'processing' | 'published' | 'failed';
+  createdAt: number;
+  publishedAt?: number;
+  platformUrl?: string;
+  error?: string;
+}>();
+
+export async function registerPublishRoutes(app: FastifyInstance): Promise<void> {
+  // Connect a platform account
+  app.post('/api/v1/publish/connect', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { platform, handle } = req.body as { platform: string; handle: string };
+    const creatorId = (req.headers['x-creator-id'] as string) ?? 'dev-creator';
+
+    if (!platform || !handle) {
+      return reply.status(400).send({ error: 'platform and handle are required' });
+    }
+
+    const allowed = ['youtube', 'instagram', 'twitter'];
+    if (!allowed.includes(platform)) {
+      return reply.status(400).send({ error: `platform must be one of: ${allowed.join(', ')}` });
+    }
+
+    if (!connectedAccounts.has(creatorId)) {
+      connectedAccounts.set(creatorId, new Map());
+    }
+    connectedAccounts.get(creatorId)!.set(platform, {
+      platform,
+      handle: handle.trim(),
+      connectedAt: Date.now(),
+    });
+
+    return reply.send({ status: 'connected', platform, handle: handle.trim() });
+  });
+
+  // List connected accounts
+  app.get('/api/v1/publish/accounts', async (req: FastifyRequest, reply: FastifyReply) => {
+    const creatorId = (req.headers['x-creator-id'] as string) ?? 'dev-creator';
+    const accounts = connectedAccounts.get(creatorId);
+    if (!accounts) {
+      return reply.send({ accounts: [] });
+    }
+    return reply.send({ accounts: Array.from(accounts.values()) });
+  });
+
+  // Disconnect a platform account
+  app.delete('/api/v1/publish/accounts/:platform', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { platform } = req.params as { platform: string };
+    const creatorId = (req.headers['x-creator-id'] as string) ?? 'dev-creator';
+    const accounts = connectedAccounts.get(creatorId);
+    if (accounts) {
+      accounts.delete(platform);
+    }
+    return reply.send({ status: 'disconnected', platform });
+  });
+
+  // Publish a video to a platform
+  app.post('/api/v1/publish', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { platform, projectId, title, description } = req.body as {
+      platform: string;
+      projectId: string;
+      title: string;
+      description?: string;
+    };
+    const creatorId = (req.headers['x-creator-id'] as string) ?? 'dev-creator';
+
+    if (!platform || !projectId || !title) {
+      return reply.status(400).send({ error: 'platform, projectId, and title are required' });
+    }
+
+    // Check account is connected
+    const accounts = connectedAccounts.get(creatorId);
+    const account = accounts?.get(platform);
+    if (!account) {
+      return reply.status(400).send({ error: `No ${platform} account connected. Please connect your account first.` });
+    }
+
+    const jobId = `pub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const job = {
+      id: jobId,
+      creatorId,
+      platform,
+      projectId,
+      title,
+      description: description ?? '',
+      status: 'queued' as const,
+      createdAt: Date.now(),
+    };
+    publishJobs.set(jobId, job);
+
+    // Simulate async publishing pipeline (processing → published)
+    setTimeout(() => {
+      const j = publishJobs.get(jobId);
+      if (j) j.status = 'processing';
+    }, 500);
+
+    setTimeout(() => {
+      const j = publishJobs.get(jobId);
+      if (j) {
+        j.status = 'published';
+        j.publishedAt = Date.now();
+        const urlMap: Record<string, string> = {
+          youtube: `https://youtube.com/shorts/${jobId}`,
+          instagram: `https://instagram.com/reel/${jobId}`,
+          twitter: `https://x.com/i/status/${jobId}`,
+        };
+        j.platformUrl = urlMap[platform] ?? `https://${platform}.com/${jobId}`;
+      }
+    }, 3000);
+
+    return reply.status(202).send({ jobId, status: 'queued' });
+  });
+
+  // Get publish job status
+  app.get('/api/v1/publish/:jobId', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { jobId } = req.params as { jobId: string };
+    const job = publishJobs.get(jobId);
+    if (!job) {
+      return reply.status(404).send({ error: 'Publish job not found' });
+    }
+    return reply.send(job);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Experiment routes
 // ---------------------------------------------------------------------------
 export async function registerExperimentRoutes(app: FastifyInstance): Promise<void> {
@@ -730,6 +866,7 @@ export async function registerAllRoutes(app: FastifyInstance): Promise<void> {
   await registerStrategyRoutes(app);
   await registerRenderRoutes(app);
   await registerCreatorRoutes(app);
+  await registerPublishRoutes(app);
   await registerExperimentRoutes(app);
   await registerCollabRoutes(app);
   await registerMetricsRoutes(app);

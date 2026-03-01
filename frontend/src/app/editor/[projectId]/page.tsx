@@ -96,6 +96,72 @@ export default function EditorPage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [postingTo, setPostingTo] = useState<string | null>(null);
   const [postStatus, setPostStatus] = useState<Record<string, 'idle' | 'posting' | 'done' | 'error'>>({});
+  const [postTitle, setPostTitle] = useState('');
+  const [postDescription, setPostDescription] = useState('');
+  const [connectedAccounts, setConnectedAccounts] = useState<Record<string, string>>({});
+  const [publishUrls, setPublishUrls] = useState<Record<string, string>>({});
+  const [publishErrors, setPublishErrors] = useState<Record<string, string>>({});
+
+  // Load connected accounts when share modal opens
+  useEffect(() => {
+    if (showShareModal) {
+      api.getConnectedAccounts().then(res => {
+        const map: Record<string, string> = {};
+        for (const a of res.accounts) map[a.platform] = a.handle;
+        setConnectedAccounts(map);
+      }).catch(() => {});
+      // Default title from project name
+      if (!postTitle && project?.name) setPostTitle(project.name);
+    }
+  }, [showShareModal]);
+
+  // Publish to a platform via backend
+  const handlePublish = async (platform: string) => {
+    if (!postTitle.trim()) return;
+    setPostingTo(platform);
+    setPostStatus(s => ({ ...s, [platform]: 'posting' }));
+    setPublishErrors(s => { const n = { ...s }; delete n[platform]; return n; });
+
+    try {
+      const { jobId } = await api.publishVideo({
+        platform,
+        projectId,
+        title: postTitle.trim(),
+        description: postDescription.trim() || undefined,
+      });
+
+      // Poll for completion
+      const poll = async () => {
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          try {
+            const job = await api.getPublishStatus(jobId);
+            if (job.status === 'published') {
+              setPostStatus(s => ({ ...s, [platform]: 'done' }));
+              if (job.platformUrl) setPublishUrls(s => ({ ...s, [platform]: job.platformUrl! }));
+              setPostingTo(null);
+              return;
+            }
+            if (job.status === 'failed') {
+              setPostStatus(s => ({ ...s, [platform]: 'error' }));
+              setPublishErrors(s => ({ ...s, [platform]: job.error ?? 'Publishing failed' }));
+              setPostingTo(null);
+              return;
+            }
+          } catch {}
+        }
+        // Timeout
+        setPostStatus(s => ({ ...s, [platform]: 'error' }));
+        setPublishErrors(s => ({ ...s, [platform]: 'Publish timed out' }));
+        setPostingTo(null);
+      };
+      poll();
+    } catch (err: any) {
+      setPostStatus(s => ({ ...s, [platform]: 'error' }));
+      setPublishErrors(s => ({ ...s, [platform]: err.message ?? 'Failed to publish' }));
+      setPostingTo(null);
+    }
+  };
 
   // Video upload
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -1640,9 +1706,9 @@ export default function EditorPage() {
       {/* Share / Post Modal */}
       {showShareModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowShareModal(false)}>
-          <div className="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-md mx-4 p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-lg mx-4 p-6 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold text-white">Post Your Short</h2>
+              <h2 className="text-lg font-bold text-white">Publish Your Short</h2>
               <button onClick={() => setShowShareModal(false)} className="text-dark-400 hover:text-white transition-colors text-xl leading-none">&times;</button>
             </div>
 
@@ -1653,95 +1719,125 @@ export default function EditorPage() {
               </div>
             )}
 
-            <p className="text-dark-400 text-sm mb-5">Choose where to publish your edited video.</p>
-
-            <div className="space-y-3">
-              {/* Instagram Reels */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-dark-700/60 border border-dark-600 hover:border-pink-500/50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-semibold">Instagram Reels</p>
-                    <p className="text-dark-400 text-xs">Share as a Reel</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    setPostingTo('instagram');
-                    setPostStatus(s => ({ ...s, instagram: 'posting' }));
-                    setTimeout(() => setPostStatus(s => ({ ...s, instagram: 'done' })), 2200);
-                  }}
-                  disabled={postStatus.instagram === 'posting' || postStatus.instagram === 'done'}
-                  className={`text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors ${
-                    postStatus.instagram === 'done' ? 'bg-green-600 text-white' :
-                    postStatus.instagram === 'posting' ? 'bg-dark-600 text-dark-400 cursor-wait' :
-                    'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600'
-                  }`}
-                >
-                  {postStatus.instagram === 'done' ? '✓ Posted' : postStatus.instagram === 'posting' ? 'Posting…' : 'Post'}
-                </button>
+            {/* Title & Description */}
+            <div className="space-y-3 mb-5">
+              <div>
+                <label className="block text-xs font-medium text-white/50 mb-1.5">Title *</label>
+                <input
+                  type="text"
+                  value={postTitle}
+                  onChange={e => setPostTitle(e.target.value)}
+                  placeholder="Give your short a title…"
+                  className="input text-sm"
+                  maxLength={100}
+                />
               </div>
-
-              {/* YouTube Shorts */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-dark-700/60 border border-dark-600 hover:border-red-500/50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-red-600 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-semibold">YouTube Shorts</p>
-                    <p className="text-dark-400 text-xs">Upload as a Short</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    setPostingTo('youtube');
-                    setPostStatus(s => ({ ...s, youtube: 'posting' }));
-                    setTimeout(() => setPostStatus(s => ({ ...s, youtube: 'done' })), 2500);
-                  }}
-                  disabled={postStatus.youtube === 'posting' || postStatus.youtube === 'done'}
-                  className={`text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors ${
-                    postStatus.youtube === 'done' ? 'bg-green-600 text-white' :
-                    postStatus.youtube === 'posting' ? 'bg-dark-600 text-dark-400 cursor-wait' :
-                    'bg-red-600 text-white hover:bg-red-700'
-                  }`}
-                >
-                  {postStatus.youtube === 'done' ? '✓ Posted' : postStatus.youtube === 'posting' ? 'Posting…' : 'Post'}
-                </button>
-              </div>
-
-              {/* X (Twitter) */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-dark-700/60 border border-dark-600 hover:border-dark-400/50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-black border border-dark-600 flex items-center justify-center">
-                    <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-semibold">X (Twitter)</p>
-                    <p className="text-dark-400 text-xs">Post as a video</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    setPostingTo('twitter');
-                    setPostStatus(s => ({ ...s, twitter: 'posting' }));
-                    setTimeout(() => setPostStatus(s => ({ ...s, twitter: 'done' })), 2000);
-                  }}
-                  disabled={postStatus.twitter === 'posting' || postStatus.twitter === 'done'}
-                  className={`text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors ${
-                    postStatus.twitter === 'done' ? 'bg-green-600 text-white' :
-                    postStatus.twitter === 'posting' ? 'bg-dark-600 text-dark-400 cursor-wait' :
-                    'bg-white text-black hover:bg-gray-200'
-                  }`}
-                >
-                  {postStatus.twitter === 'done' ? '✓ Posted' : postStatus.twitter === 'posting' ? 'Posting…' : 'Post'}
-                </button>
+              <div>
+                <label className="block text-xs font-medium text-white/50 mb-1.5">Description</label>
+                <textarea
+                  value={postDescription}
+                  onChange={e => setPostDescription(e.target.value)}
+                  placeholder="Add a description, hashtags, or mentions…"
+                  className="input text-sm resize-none"
+                  rows={3}
+                  maxLength={2200}
+                />
+                <p className="text-[10px] text-white/20 mt-1 text-right">{postDescription.length}/2200</p>
               </div>
             </div>
 
-            <p className="text-dark-500 text-xs mt-4 text-center">Connect your accounts in Settings to enable direct posting.</p>
+            <p className="text-dark-400 text-xs mb-3 font-medium uppercase tracking-wide">Publish to</p>
+
+            <div className="space-y-3">
+              {/* Platform cards — data-driven */}
+              {([
+                {
+                  key: 'youtube',
+                  name: 'YouTube Shorts',
+                  subtitle: 'Upload as a Short',
+                  iconBg: 'bg-red-600',
+                  icon: <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>,
+                  hoverBorder: 'hover:border-red-500/50',
+                  btnClass: 'bg-red-600 text-white hover:bg-red-700',
+                },
+                {
+                  key: 'instagram',
+                  name: 'Instagram Reels',
+                  subtitle: 'Share as a Reel',
+                  iconBg: 'bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400',
+                  icon: <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>,
+                  hoverBorder: 'hover:border-pink-500/50',
+                  btnClass: 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600',
+                },
+                {
+                  key: 'twitter',
+                  name: 'X (Twitter)',
+                  subtitle: 'Post as a video',
+                  iconBg: 'bg-black border border-dark-600',
+                  icon: <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>,
+                  hoverBorder: 'hover:border-dark-400/50',
+                  btnClass: 'bg-white text-black hover:bg-gray-200',
+                },
+              ] as const).map(platform => {
+                const status = postStatus[platform.key];
+                const connected = !!connectedAccounts[platform.key];
+                const url = publishUrls[platform.key];
+                const error = publishErrors[platform.key];
+
+                return (
+                  <div key={platform.key} className={`p-3 rounded-xl bg-dark-700/60 border border-dark-600 ${platform.hoverBorder} transition-colors`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-lg ${platform.iconBg} flex items-center justify-center`}>
+                          {platform.icon}
+                        </div>
+                        <div>
+                          <p className="text-white text-sm font-semibold">{platform.name}</p>
+                          <p className="text-dark-400 text-xs">
+                            {connected ? <span className="text-emerald-400">@{connectedAccounts[platform.key]}</span> : platform.subtitle}
+                          </p>
+                        </div>
+                      </div>
+                      {!connected ? (
+                        <span className="text-[10px] text-dark-400 border border-dark-600 px-2 py-1 rounded-md">Not connected</span>
+                      ) : status === 'done' ? (
+                        <span className="text-xs font-semibold px-4 py-1.5 rounded-lg bg-green-600 text-white">✓ Published</span>
+                      ) : (
+                        <button
+                          onClick={() => handlePublish(platform.key)}
+                          disabled={!postTitle.trim() || status === 'posting'}
+                          className={`text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                            status === 'posting' ? 'bg-dark-600 text-dark-400 cursor-wait' : platform.btnClass
+                          }`}
+                        >
+                          {status === 'posting' ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              Publishing…
+                            </span>
+                          ) : 'Publish'}
+                        </button>
+                      )}
+                    </div>
+                    {/* Published URL */}
+                    {status === 'done' && url && (
+                      <div className="mt-2 flex items-center gap-2 px-3 py-1.5 bg-dark-800 rounded-lg">
+                        <span className="text-[10px] text-emerald-400 truncate flex-1">{url}</span>
+                        <button onClick={() => navigator.clipboard.writeText(url)} className="text-[10px] text-brand-400 hover:text-brand-300 whitespace-nowrap">Copy link</button>
+                      </div>
+                    )}
+                    {/* Error */}
+                    {status === 'error' && error && (
+                      <p className="mt-2 text-[11px] text-red-400 px-1">{error}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <p className="text-dark-500 text-xs mt-4 text-center">
+              Connect accounts on your <a href="/profile" className="text-brand-400 hover:text-brand-300 underline">Profile</a> page to enable publishing.
+            </p>
           </div>
         </div>
       )}

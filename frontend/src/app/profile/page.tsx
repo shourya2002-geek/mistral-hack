@@ -27,19 +27,31 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
 
   // YouTube account connection
-  const [ytChannel, setYtChannel] = useState<string>(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('vircut_yt_channel') ?? '';
-    return '';
-  });
-  const [ytConnected, setYtConnected] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('vircut_yt_connected') === 'true';
-    return false;
-  });
-  const [ytConnecting, setYtConnecting] = useState(false);
+  // Connected accounts (loaded from backend)
+  const [connectedAccounts, setConnectedAccounts] = useState<Record<string, string>>({});
+  const [ytChannel, setYtChannel] = useState('');
+  const [igHandle, setIgHandle] = useState('');
+  const [xHandle, setXHandle] = useState('');
+  const [connecting, setConnecting] = useState<string | null>(null);
 
   useEffect(() => {
     loadProfile();
+    loadAccounts();
   }, []);
+
+  const loadAccounts = async () => {
+    try {
+      const { accounts } = await api.getConnectedAccounts();
+      const map: Record<string, string> = {};
+      for (const a of accounts) {
+        map[a.platform] = a.handle;
+        if (a.platform === 'youtube') setYtChannel(a.handle);
+        if (a.platform === 'instagram') setIgHandle(a.handle);
+        if (a.platform === 'twitter') setXHandle(a.handle);
+      }
+      setConnectedAccounts(map);
+    } catch {}
+  };
 
   const loadProfile = async () => {
     try {
@@ -56,23 +68,33 @@ export default function ProfilePage() {
     }
   };
 
-  const connectYouTube = () => {
-    if (!ytChannel.trim()) return;
-    setYtConnecting(true);
-    // Simulate OAuth flow
-    setTimeout(() => {
-      localStorage.setItem('vircut_yt_channel', ytChannel.trim());
-      localStorage.setItem('vircut_yt_connected', 'true');
-      setYtConnected(true);
-      setYtConnecting(false);
-    }, 1500);
+  const connectAccount = async (platform: string, handle: string) => {
+    if (!handle.trim()) return;
+    setConnecting(platform);
+    try {
+      await api.connectAccount(platform, handle.trim());
+      setConnectedAccounts(s => ({ ...s, [platform]: handle.trim() }));
+    } catch (err) {
+      console.error('Failed to connect', err);
+    } finally {
+      setConnecting(null);
+    }
   };
 
-  const disconnectYouTube = () => {
-    localStorage.removeItem('vircut_yt_channel');
-    localStorage.removeItem('vircut_yt_connected');
-    setYtConnected(false);
-    setYtChannel('');
+  const disconnectAccount = async (platform: string) => {
+    try {
+      await api.disconnectAccount(platform);
+      setConnectedAccounts(s => {
+        const n = { ...s };
+        delete n[platform];
+        return n;
+      });
+      if (platform === 'youtube') setYtChannel('');
+      if (platform === 'instagram') setIgHandle('');
+      if (platform === 'twitter') setXHandle('');
+    } catch (err) {
+      console.error('Failed to disconnect', err);
+    }
   };
 
   // Map API fields to display values safely
@@ -230,7 +252,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* YouTube Account Configuration */}
+      {/* Connected Accounts */}
       <div>
         <h2 className="text-lg font-semibold mb-4">Connected Accounts</h2>
         <div className="card p-5 space-y-4">
@@ -242,17 +264,17 @@ export default function ProfilePage() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-white">YouTube</p>
-                {ytConnected ? (
+                {connectedAccounts['youtube'] ? (
                   <p className="text-xs text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" /> Connected — {ytChannel}
+                    <CheckCircle2 className="w-3 h-3" /> Connected — {connectedAccounts['youtube']}
                   </p>
                 ) : (
                   <p className="text-xs text-white/40">Connect your channel to post Shorts directly</p>
                 )}
               </div>
             </div>
-            {ytConnected ? (
-              <button onClick={disconnectYouTube} className="text-xs text-red-400 hover:text-red-300 border border-red-500/30 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+            {connectedAccounts['youtube'] ? (
+              <button onClick={() => disconnectAccount('youtube')} className="text-xs text-red-400 hover:text-red-300 border border-red-500/30 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
                 <Unlink className="w-3 h-3" /> Disconnect
               </button>
             ) : (
@@ -262,15 +284,15 @@ export default function ProfilePage() {
                   placeholder="Channel name or URL"
                   value={ytChannel}
                   onChange={e => setYtChannel(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && connectYouTube()}
+                  onKeyDown={e => e.key === 'Enter' && ytChannel.trim() && connectAccount('youtube', ytChannel)}
                   className="input text-xs py-1.5 px-3 w-48"
                 />
                 <button
-                  onClick={connectYouTube}
-                  disabled={!ytChannel.trim() || ytConnecting}
+                  onClick={() => connectAccount('youtube', ytChannel)}
+                  disabled={!ytChannel.trim() || connecting === 'youtube'}
                   className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-40"
                 >
-                  {ytConnecting ? (
+                  {connecting === 'youtube' ? (
                     <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Connecting…</>
                   ) : (
                     <><Link2 className="w-3 h-3" /> Connect</>
@@ -290,10 +312,42 @@ export default function ProfilePage() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-white">Instagram Reels</p>
-                <p className="text-xs text-white/40">Coming soon — requires Meta Business API</p>
+                {connectedAccounts['instagram'] ? (
+                  <p className="text-xs text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Connected — {connectedAccounts['instagram']}
+                  </p>
+                ) : (
+                  <p className="text-xs text-white/40">Connect your Instagram to post Reels directly</p>
+                )}
               </div>
             </div>
-            <span className="text-[10px] text-white/30 border border-dark-600 px-2 py-1 rounded-md">Coming Soon</span>
+            {connectedAccounts['instagram'] ? (
+              <button onClick={() => disconnectAccount('instagram')} className="text-xs text-red-400 hover:text-red-300 border border-red-500/30 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+                <Unlink className="w-3 h-3" /> Disconnect
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Instagram handle"
+                  value={igHandle}
+                  onChange={e => setIgHandle(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && igHandle.trim() && connectAccount('instagram', igHandle)}
+                  className="input text-xs py-1.5 px-3 w-48"
+                />
+                <button
+                  onClick={() => connectAccount('instagram', igHandle)}
+                  disabled={!igHandle.trim() || connecting === 'instagram'}
+                  className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-40"
+                >
+                  {connecting === 'instagram' ? (
+                    <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Connecting…</>
+                  ) : (
+                    <><Link2 className="w-3 h-3" /> Connect</>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="border-t border-dark-600" />
@@ -306,10 +360,42 @@ export default function ProfilePage() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-white">X (Twitter)</p>
-                <p className="text-xs text-white/40">Coming soon — requires X API v2</p>
+                {connectedAccounts['twitter'] ? (
+                  <p className="text-xs text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Connected — {connectedAccounts['twitter']}
+                  </p>
+                ) : (
+                  <p className="text-xs text-white/40">Connect your X account to post videos</p>
+                )}
               </div>
             </div>
-            <span className="text-[10px] text-white/30 border border-dark-600 px-2 py-1 rounded-md">Coming Soon</span>
+            {connectedAccounts['twitter'] ? (
+              <button onClick={() => disconnectAccount('twitter')} className="text-xs text-red-400 hover:text-red-300 border border-red-500/30 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+                <Unlink className="w-3 h-3" /> Disconnect
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="X handle (e.g. @user)"
+                  value={xHandle}
+                  onChange={e => setXHandle(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && xHandle.trim() && connectAccount('twitter', xHandle)}
+                  className="input text-xs py-1.5 px-3 w-48"
+                />
+                <button
+                  onClick={() => connectAccount('twitter', xHandle)}
+                  disabled={!xHandle.trim() || connecting === 'twitter'}
+                  className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-40"
+                >
+                  {connecting === 'twitter' ? (
+                    <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Connecting…</>
+                  ) : (
+                    <><Link2 className="w-3 h-3" /> Connect</>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -319,9 +405,9 @@ export default function ProfilePage() {
         <h2 className="text-lg font-semibold mb-4">Platform Preferences</h2>
         <div className="grid grid-cols-3 gap-3">
           {[
-            { name: 'Instagram Reels', active: true, color: 'border-pink-500/40 bg-pink-500/10' },
-            { name: 'YouTube Shorts', active: ytConnected, color: 'border-red-500/40 bg-red-500/10' },
-            { name: 'X (Twitter)', active: false, color: 'border-white/20 bg-white/5' },
+            { name: 'Instagram Reels', active: !!connectedAccounts['instagram'], color: 'border-pink-500/40 bg-pink-500/10' },
+            { name: 'YouTube Shorts', active: !!connectedAccounts['youtube'], color: 'border-red-500/40 bg-red-500/10' },
+            { name: 'X (Twitter)', active: !!connectedAccounts['twitter'], color: 'border-white/20 bg-white/5' },
           ].map((platform) => (
             <div
               key={platform.name}

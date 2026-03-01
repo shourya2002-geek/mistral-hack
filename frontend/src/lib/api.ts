@@ -203,6 +203,41 @@ class ApiClient {
     return this.request<any>(`/experiments/${id}/results`);
   }
 
+  // --- Publishing ---
+  async connectAccount(platform: string, handle: string) {
+    return this.request<{ status: string; platform: string; handle: string }>('/publish/connect', {
+      method: 'POST',
+      body: JSON.stringify({ platform, handle }),
+    });
+  }
+
+  async getConnectedAccounts() {
+    return this.request<{ accounts: Array<{ platform: string; handle: string; connectedAt: number }> }>('/publish/accounts');
+  }
+
+  async disconnectAccount(platform: string) {
+    return this.request<{ status: string; platform: string }>(`/publish/accounts/${platform}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async publishVideo(data: { platform: string; projectId: string; title: string; description?: string }) {
+    return this.request<{ jobId: string; status: string }>('/publish', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getPublishStatus(jobId: string) {
+    return this.request<{
+      id: string;
+      platform: string;
+      status: 'queued' | 'processing' | 'published' | 'failed';
+      platformUrl?: string;
+      error?: string;
+    }>(`/publish/${jobId}`);
+  }
+
   // --- Health ---
   async health() {
     const res = await fetch('/health');
