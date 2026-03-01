@@ -305,3 +305,42 @@ export function typewriterEffect(
     }, speed);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Helper: speak text aloud using Web Speech Synthesis (TTS)
+// ---------------------------------------------------------------------------
+export function speakText(
+  text: string,
+  options?: { rate?: number; pitch?: number; volume?: number },
+): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      // TTS not available — resolve silently
+      resolve();
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = options?.rate ?? 1.0;
+    utterance.pitch = options?.pitch ?? 1.0;
+    utterance.volume = options?.volume ?? 0.9;
+    utterance.lang = 'en-US';
+
+    // Try to pick a natural-sounding voice
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(
+      (v) => v.lang.startsWith('en') && (v.name.includes('Samantha') || v.name.includes('Google') || v.name.includes('Natural')),
+    );
+    if (preferred) utterance.voice = preferred;
+
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
+// Pre-warm voices (they may load asynchronously)
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  window.speechSynthesis.getVoices();
+  // Chrome loads voices asynchronously
+  window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
+}
