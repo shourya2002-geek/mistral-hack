@@ -113,6 +113,9 @@ export default function EditorPage() {
   const demoAbortRef = useRef(false);
   const demoUploadDoneRef = useRef(false);
   const runDemoRef = useRef<() => Promise<void>>();
+  // Demo voice simulation (no real mic needed)
+  const [demoVoiceListening, setDemoVoiceListening] = useState(false);
+  const [demoTranscript, setDemoTranscript] = useState('');
 
   // Load connected accounts when share modal opens
   useEffect(() => {
@@ -631,6 +634,8 @@ export default function EditorPage() {
     setPublishUrls({});
     setPublishErrors({});
     setConnectedAccounts({});
+    setDemoVoiceListening(false);
+    setDemoTranscript('');
 
     const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -750,6 +755,41 @@ export default function EditorPage() {
           }
           break;
 
+        case 'start-voice':
+          setDemoVoiceListening(true);
+          setDemoTranscript('');
+          break;
+
+        case 'voice-command':
+          if (step.text) {
+            // Simulate transcript appearing word-by-word
+            const words = step.text.split(' ');
+            for (let w = 0; w < words.length; w++) {
+              if (demoAbortRef.current) break;
+              setDemoTranscript(words.slice(0, w + 1).join(' '));
+              await wait(step.typeSpeed ?? 55);
+            }
+            if (demoAbortRef.current) break;
+            await wait(600);
+            // Add user message (voice command) to chat
+            setChatMessages(prev => [...prev, { role: 'user', text: `🎙️ ${step.text}` }]);
+            setDemoTranscript('');
+            // Process the pre-scripted response (same as send-chat)
+            if (step.response) {
+              setGenerating(true);
+              await wait(1200);
+              if (demoAbortRef.current) { setGenerating(false); break; }
+              setGenerating(false);
+              applyDemoResponse(step.response);
+            }
+          }
+          break;
+
+        case 'stop-voice':
+          setDemoVoiceListening(false);
+          setDemoTranscript('');
+          break;
+
         case 'play-video':
           setIsPlaying(true);
           break;
@@ -824,6 +864,8 @@ export default function EditorPage() {
     setDemoStepIndex(-1);
     setGenerating(false);
     setIsPlaying(false);
+    setDemoVoiceListening(false);
+    setDemoTranscript('');
   }, []);
 
   // Auto-start demo if URL has ?demo=1 — wait for project to finish loading first
@@ -1126,11 +1168,14 @@ export default function EditorPage() {
                 Live
               </span>
               <button
-                onClick={() => voice.isListening ? voice.stopListening() : voice.startListening()}
-                className={`btn-ghost p-2 ${voice.isListening ? 'text-red-400 bg-red-500/10' : ''}`}
-                title={voice.isListening ? 'Stop Voice' : 'Start Voice'}
+                onClick={() => {
+                  if (demoVoiceListening) return;
+                  voice.isListening ? voice.stopListening() : voice.startListening();
+                }}
+                className={`btn-ghost p-2 ${(voice.isListening || demoVoiceListening) ? 'text-red-400 bg-red-500/10' : ''}`}
+                title={(voice.isListening || demoVoiceListening) ? 'Stop Voice' : 'Start Voice'}
               >
-                {voice.isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                {(voice.isListening || demoVoiceListening) ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
               <button
                 onClick={endSession}
@@ -1938,75 +1983,87 @@ export default function EditorPage() {
                   </div>
                 ) : (
                   <>
-                    <div className="text-center py-8">
-                      <button
-                        onClick={() => voice.isListening ? voice.stopListening() : voice.startListening()}
-                        className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center transition-all ${
-                          voice.isListening
-                            ? 'bg-red-500/20 border-2 border-red-500 animate-pulse shadow-lg shadow-red-500/20'
-                            : 'bg-surface-3 border-2 border-surface-4 hover:border-brand-500/50 hover:bg-brand-500/10'
-                        }`}
-                      >
-                        {voice.isListening ? (
-                          <MicOff className="w-8 h-8 text-red-400" />
-                        ) : (
-                          <Mic className="w-8 h-8 text-white/40" />
-                        )}
-                      </button>
-                      <p className="text-sm font-medium mt-4">
-                        {voice.isListening ? 'Listening...' : 'Tap to start voice commands'}
-                      </p>
-                      <p className="text-xs text-white/40 mt-1">
-                        {voice.isListening
-                          ? 'Speak naturally — "cut the first 3 seconds", "add captions"'
-                          : 'Use voice to control the editor hands-free'
-                        }
-                      </p>
-                      {voice.wsStatus !== 'disconnected' && (
-                        <p className="text-[10px] text-white/20 mt-2">
-                          WS: {voice.wsStatus}
-                        </p>
-                      )}
-                    </div>
+                    {/* Voice button — reflects real OR demo-simulated listening */}
+                    {(() => {
+                      const isActive = voice.isListening || demoVoiceListening;
+                      const activeTranscript = voice.transcript || demoTranscript;
+                      return (
+                        <>
+                          <div className="text-center py-8">
+                            <button
+                              onClick={() => {
+                                if (demoVoiceListening) return; // don't toggle during demo
+                                voice.isListening ? voice.stopListening() : voice.startListening();
+                              }}
+                              className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center transition-all ${
+                                isActive
+                                  ? 'bg-red-500/20 border-2 border-red-500 animate-pulse shadow-lg shadow-red-500/20'
+                                  : 'bg-surface-3 border-2 border-surface-4 hover:border-brand-500/50 hover:bg-brand-500/10'
+                              }`}
+                            >
+                              {isActive ? (
+                                <MicOff className="w-8 h-8 text-red-400" />
+                              ) : (
+                                <Mic className="w-8 h-8 text-white/40" />
+                              )}
+                            </button>
+                            <p className="text-sm font-medium mt-4">
+                              {isActive ? 'Listening...' : 'Tap to start voice commands'}
+                            </p>
+                            <p className="text-xs text-white/40 mt-1">
+                              {isActive
+                                ? 'Speak naturally — "cut the first 3 seconds", "add captions"'
+                                : 'Use voice to control the editor hands-free'
+                              }
+                            </p>
+                            {!demoVoiceListening && voice.wsStatus !== 'disconnected' && (
+                              <p className="text-[10px] text-white/20 mt-2">
+                                WS: {voice.wsStatus}
+                              </p>
+                            )}
+                          </div>
 
-                    {/* Waveform visualization */}
-                    {voice.isListening && (
-                      <div className="flex items-center justify-center gap-0.5 h-12">
-                        {Array.from({ length: 20 }, (_, i) => (
-                          <div
-                            key={i}
-                            className="w-1 bg-brand-400 rounded-full animate-waveform"
-                            style={{
-                              animationDelay: `${i * 0.05}s`,
-                              height: `${Math.random() * 100}%`,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Transcript */}
-                    {voice.transcript && (
-                      <div className="p-3 rounded-lg bg-surface-2 border border-surface-4/50">
-                        <span className="text-[10px] font-medium text-white/40 block mb-1">Transcript</span>
-                        <p className="text-sm text-white/80">{voice.transcript}</p>
-                      </div>
-                    )}
-
-                    {/* Voice command history */}
-                    {voice.commands.length > 0 && (
-                      <div>
-                        <span className="text-xs font-medium text-white/50 block mb-2">Command History</span>
-                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                          {voice.commands.map((cmd, i) => (
-                            <div key={i} className="flex items-center gap-2 p-2 rounded bg-surface-2 text-xs">
-                              <ChevronRight className="w-3 h-3 text-brand-400 shrink-0" />
-                              <span className="text-white/70">{cmd.text}</span>
+                          {/* Waveform visualization */}
+                          {isActive && (
+                            <div className="flex items-center justify-center gap-0.5 h-12">
+                              {Array.from({ length: 20 }, (_, i) => (
+                                <div
+                                  key={i}
+                                  className="w-1 bg-brand-400 rounded-full animate-waveform"
+                                  style={{
+                                    animationDelay: `${i * 0.05}s`,
+                                    height: `${Math.random() * 100}%`,
+                                  }}
+                                />
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                          )}
+
+                          {/* Transcript (real or demo-simulated) */}
+                          {activeTranscript && (
+                            <div className="p-3 rounded-lg bg-surface-2 border border-surface-4/50">
+                              <span className="text-[10px] font-medium text-white/40 block mb-1">Transcript</span>
+                              <p className="text-sm text-white/80">{activeTranscript}</p>
+                            </div>
+                          )}
+
+                          {/* Voice command history */}
+                          {voice.commands.length > 0 && (
+                            <div>
+                              <span className="text-xs font-medium text-white/50 block mb-2">Command History</span>
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                {voice.commands.map((cmd, i) => (
+                                  <div key={i} className="flex items-center gap-2 p-2 rounded bg-surface-2 text-xs">
+                                    <ChevronRight className="w-3 h-3 text-brand-400 shrink-0" />
+                                    <span className="text-white/70">{cmd.text}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </>
                 )}
               </div>

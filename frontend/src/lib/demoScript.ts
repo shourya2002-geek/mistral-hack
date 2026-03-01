@@ -25,6 +25,9 @@ export type DemoStepType =
   | 'simulate-upload'
   | 'trigger-upload'
   | 'start-session'
+  | 'start-voice'
+  | 'voice-command'
+  | 'stop-voice'
   | 'play-video'
   | 'pause-video'
   | 'toggle-preview'
@@ -142,6 +145,20 @@ const RESPONSE_SPEED: DemoAIResponse = {
   strategyName: 'speed_ramp',
 };
 
+const RESPONSE_VOICE_ZOOM: DemoAIResponse = {
+  message: 'Added a slow cinematic zoom on the ending — 1.3× from the 22-second mark through the end. Gives it a dramatic close! 🔍',
+  operations: [
+    {
+      type: 'zoom',
+      startMs: 22000,
+      endMs: 30000,
+      params: { level: 1.3 },
+      description: 'Slow cinematic zoom on ending',
+    },
+  ],
+  strategyName: 'ending_zoom',
+};
+
 // ---------------------------------------------------------------------------
 // Full demo sequence
 // ---------------------------------------------------------------------------
@@ -197,7 +214,31 @@ export const DEMO_STEPS: DemoStep[] = [
   // 10. Wait
   { type: 'wait', delay: 2000, duration: 2000 },
 
-  // 11. Toggle preview mode
+  // 11. Switch to voice tab
+  { type: 'switch-tab', delay: 1000, tab: 'voice' },
+
+  // 12. Start voice listening (simulated for demo)
+  { type: 'start-voice', delay: 1200 },
+
+  // 13. Simulate a voice command — transcript appears, then processed
+  {
+    type: 'voice-command',
+    delay: 1500,
+    text: 'add a slow zoom on the ending',
+    typeSpeed: 55,
+    response: RESPONSE_VOICE_ZOOM,
+  },
+
+  // 14. Wait for user to see the result
+  { type: 'wait', delay: 2500, duration: 2500 },
+
+  // 15. Stop voice
+  { type: 'stop-voice', delay: 500 },
+
+  // 16. Switch back to AI chat
+  { type: 'switch-tab', delay: 800, tab: 'ai-chat' },
+
+  // 17. Toggle preview mode
   { type: 'toggle-preview', delay: 1000 },
 
   // 12. Play video for a bit
