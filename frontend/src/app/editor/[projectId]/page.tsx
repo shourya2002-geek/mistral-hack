@@ -111,6 +111,7 @@ export default function EditorPage() {
   const [demoRunning, setDemoRunning] = useState(false);
   const [demoStepIndex, setDemoStepIndex] = useState(-1);
   const demoAbortRef = useRef(false);
+  const runDemoRef = useRef<() => Promise<void>>();
 
   // Load connected accounts when share modal opens
   useEffect(() => {
@@ -789,6 +790,11 @@ export default function EditorPage() {
     editStack, applyDemoResponse, videoDuration, duration,
   ]);
 
+  // Always keep the ref pointing to latest runDemo
+  useEffect(() => {
+    runDemoRef.current = runDemo;
+  }, [runDemo]);
+
   /** Stop the demo */
   const stopDemo = useCallback(() => {
     demoAbortRef.current = true;
@@ -798,19 +804,19 @@ export default function EditorPage() {
     setIsPlaying(false);
   }, []);
 
-  // Auto-start demo if URL has ?demo=1
+  // Auto-start demo if URL has ?demo=1 — wait for project to finish loading first
   const demoAutoStarted = useRef(false);
   useEffect(() => {
-    if (isDemoUrl && !demoAutoStarted.current && !demoRunning) {
+    if (isDemoUrl && !projectLoading && !demoAutoStarted.current && !demoRunning) {
       demoAutoStarted.current = true;
-      // Delay slightly so the project loads first
+      // Small delay for the UI to settle, then fire the *latest* runDemo via ref
       const timer = setTimeout(() => {
         setDemoMode(true);
-        runDemo();
-      }, 1500);
+        runDemoRef.current?.();
+      }, 800);
       return () => clearTimeout(timer);
     }
-  }, [isDemoUrl]);
+  }, [isDemoUrl, projectLoading]);
 
   // -----------------------------------------------------------------------
   // Voice command → strategy
