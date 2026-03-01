@@ -76,11 +76,20 @@ CRITICAL RULES:
 6. ALWAYS include BOTH startMs AND endMs for every operation (except split which only needs startMs, and reset_all which needs neither).
 7. When user says "cut" they mean REMOVE that segment. "trim" means remove from start or end.
 8. For "reset/clear/start over", include {"type": "reset_all"} in operations.
-9. For "make a 30 second video" from a 60s source: use cuts to remove 30s of content, keeping the strongest segments. Divide video into sections, cut the weakest parts.
-10. For "pick the best parts" or "highlights": keep the opening hook (first 3-5s), a strong middle section, and a punchy ending. Cut filler/transitions.
-11. For "make it cinematic": combine color_grade cinematic + zoom on key moments + music dramatic + fade_in + fade_out.
-12. For "make it viral" / "TikTok style": speed up slow parts (1.5x), zoom on key moments (1.3x), add bold captions, cut dead space.
-13. When applying effects to the whole video, always use startMs=0 and endMs=full video duration.`;
+9. For "pick the best parts" or "highlights": keep the opening hook (first 3-5s), a strong middle section, and a punchy ending. Cut filler/transitions.
+10. For "make it cinematic": combine color_grade cinematic + zoom on key moments + music dramatic + fade_in + fade_out.
+11. For "make it viral" / "TikTok style": speed up slow parts (1.5x), zoom on key moments (1.3x), add bold captions, cut dead space.
+12. When applying effects to the whole video, always use startMs=0 and endMs=full video duration.
+
+DURATION TARGETING (MOST IMPORTANT!):
+When the user requests a specific output duration (e.g. "30 second video", "1 minute clip", "15s short"):
+- FIRST: Calculate exactly how much content to REMOVE. Formula: removeMs = videoDurationMs - targetDurationMs.
+- SECOND: Create CUT operations whose durations add up to EXACTLY removeMs. Verify: sum of all (endMs - startMs) for every cut = removeMs.
+- THIRD: Double-check your math before responding. The kept content MUST equal the target duration.
+- Example: 208000ms video, user wants 30s (30000ms) → must cut exactly 178000ms. You could cut [0-45000] (45s) + [60000-120000] (60s) + [135000-180000] (45s) + [195000-208000] (13s) + [180000-195000] (15s) = 178000ms removed. Kept = 30000ms. ✓
+- NEVER produce cuts that leave more or less than the target. Do the arithmetic.
+- Prefer keeping: opening hook (first few seconds), climactic/interesting middle, strong closing.
+- Space the kept segments across the video for variety — don't just keep the first N seconds.`;
 
 // ---------------------------------------------------------------------------
 // ChatService
@@ -162,6 +171,17 @@ export class ChatService {
         strategyName: parsed.strategyName,
       };
 
+      // ------------------------------------------------------------------
+      // Post-process: enforce exact target duration when user asks for one
+      // ------------------------------------------------------------------
+      const targetMatch = userMessage.match(/(\d+)\s*(?:second|sec|s\b)/i);
+      if (targetMatch && result.operations.length > 0) {
+        const targetMs = parseInt(targetMatch[1], 10) * 1000;
+        if (targetMs > 0 && targetMs < videoDur) {
+          result.operations = this.enforceTargetDuration(result.operations, videoDur, targetMs);
+        }
+      }
+
       // Add assistant response to history
       history.push({ role: 'assistant', content: result.message });
 
@@ -187,5 +207,113 @@ export class ChatService {
    */
   clearConversation(conversationId: string): void {
     this.conversations.delete(conversationId);
+  }
+
+  /**
+   * Adjust cut operations so the kept duration exactly equals targetMs.
+   * Merges overlapping cuts, then either extends the last cut or adds a new
+   * one if there's too much kept content, or shrinks the last cut if too little.
+   */
+  private enforceTargetDuration(
+    operations: EditOperation[],
+    videoDur: number,
+    targetMs: number,
+  ): EditOperation[] {
+    // Separate cut/trim ops from other ops
+    const cutOps = operations.filter(op =>
+      op.type === 'cut' || op.type === 'trim_start' || op.type === 'trim_end',
+    );
+    const otherOps = operations.filter(op =>
+      op.type !== 'cut' && op.type !== 'trim_start' && op.type !== 'trim_end',
+    );
+
+    if (cutOps.length === 0) return operations;
+
+    // Normalize to [start, end] intervals
+    const intervals: [number, number][] = cutOps.map(op => {
+      const s = Math.max(0, Math.min(op.startMs ?? 0, videoDur));
+      const e = Math.max(s, Math.min(op.endMs ?? videoDur, videoDur));
+      return [s, e];
+    });
+
+    // Merge overlapping
+    intervals.sort((a, b) => a[0] - b[0]);
+    const merged: [number, number][] = [];
+    for (const [s, e] of intervals) {
+      if (merged.length > 0 && s <= merged[merged.length - 1][1]) {
+        merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
+      } else {
+        merged.push([s, e]);
+      }
+    }
+
+    // Current removed & kept
+    const totalRemoved = merged.reduce((sum, [s, e]) => sum + (e - s), 0);
+    const currentKept = videoDur - totalRemoved;
+    const needToRemove = videoDur - targetMs;
+    const diff = needToRemove - totalRemoved; // positive = need to cut more
+
+    if (Math.abs(diff) < 500) {
+      // Close enough (within 0.5s) — rebuild cut ops from merged
+    } else if (diff > 0) {
+      // Need to cut MORE content — extend the last cut or add a new one
+      // Find the largest kept gap and cut into it
+      const kept: [number, number][] = [];
+      let pos = 0;
+      for (const [s, e] of merged) {
+        if (pos < s) kept.push([pos, s]);
+        pos = e;
+      }
+      if (pos < videoDur) kept.push([pos, videoDur]);
+
+      // Sort kept segments by duration (largest first) and cut from the largest
+      let remaining = diff;
+      const keptSorted = [...kept].sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+      for (const seg of keptSorted) {
+        if (remaining <= 0) break;
+        const segLen = seg[1] - seg[0];
+        const cutAmount = Math.min(remaining, segLen - 1000); // keep at least 1s per segment
+        if (cutAmount <= 0) continue;
+        // Cut from the end of this kept segment
+        merged.push([seg[1] - cutAmount, seg[1]]);
+        remaining -= cutAmount;
+      }
+      // Re-merge
+      merged.sort((a, b) => a[0] - b[0]);
+      const reMerged: [number, number][] = [];
+      for (const [s, e] of merged) {
+        if (reMerged.length > 0 && s <= reMerged[reMerged.length - 1][1]) {
+          reMerged[reMerged.length - 1][1] = Math.max(reMerged[reMerged.length - 1][1], e);
+        } else {
+          reMerged.push([s, e]);
+        }
+      }
+      merged.length = 0;
+      merged.push(...reMerged);
+    } else {
+      // Need to cut LESS — shrink the last cut
+      let toRestore = -diff;
+      for (let i = merged.length - 1; i >= 0 && toRestore > 0; i--) {
+        const [s, e] = merged[i];
+        const segLen = e - s;
+        if (segLen <= toRestore) {
+          merged.splice(i, 1); // remove entire cut
+          toRestore -= segLen;
+        } else {
+          merged[i][1] = e - toRestore; // shrink the cut
+          toRestore = 0;
+        }
+      }
+    }
+
+    // Convert merged intervals back to cut operations
+    const newCutOps: EditOperation[] = merged.map(([s, e]) => ({
+      type: 'cut',
+      startMs: s,
+      endMs: e,
+      description: `Cut ${(s / 1000).toFixed(1)}s–${(e / 1000).toFixed(1)}s`,
+    }));
+
+    return [...newCutOps, ...otherOps];
   }
 }

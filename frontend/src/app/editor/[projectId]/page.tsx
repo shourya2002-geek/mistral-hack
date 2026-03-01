@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
+import { useState, useRef, useEffect, useCallback, useSyncExternalStore, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useVoiceWebSocket } from '@/lib/websocket';
@@ -12,7 +12,7 @@ import {
   Layers, Type, Music, Image, Scissors, Sparkles,
   ChevronRight, Send, MessageSquare, Download, Eye,
   Maximize2, Settings, SplitSquareHorizontal, Upload, CheckCircle2, Loader2,
-  ArrowLeft, PlayCircle, StopCircle,
+  ArrowLeft, PlayCircle, StopCircle, Timer,
 } from 'lucide-react';
 
 type EditorTab = 'strategy' | 'timeline' | 'voice' | 'ai-chat' | 'history';
@@ -73,6 +73,9 @@ export default function EditorPage() {
     () => false,
   );
 
+  // Preview mode — shows edited duration & plays only kept segments
+  const [previewMode, setPreviewMode] = useState(false);
+
   // Clipboard for cut
   const [cutRange, setCutRange] = useState<{ startMs: number; endMs: number } | null>(null);
 
@@ -98,6 +101,11 @@ export default function EditorPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoDuration, setVideoDuration] = useState(0);
+
+  // Timeline drag-to-seek
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const timelineRulerRef = useRef<HTMLDivElement>(null);
+  const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
 
   // -----------------------------------------------------------------------
   // Load project on mount
@@ -476,12 +484,123 @@ export default function EditorPage() {
   // Helpers (must be before handlers that use them)
   // -----------------------------------------------------------------------
   const effectiveDuration = videoDuration > 0 ? videoDuration : duration;
+
+  // -----------------------------------------------------------------------
+  // Kept segments & edited duration — derived from effective operations
+  // -----------------------------------------------------------------------
+  const { keptSegments, editedDurationMs, removedSegments, sourceToEditedTime } = useMemo(() => {
+    const dur = effectiveDuration;
+    if (dur <= 0) return { keptSegments: [] as [number, number][], editedDurationMs: 0, removedSegments: [] as [number, number][], sourceToEditedTime: (t: number) => t };
+
+    // Collect all removed intervals from cuts & trims
+    const removed: [number, number][] = [];
+    for (const op of appliedOps) {
+      const start = op._startMs ?? (op as any).startMs ?? 0;
+      const end = op._endMs ?? (op as any).endMs ?? dur;
+      if (op.type === 'cut' || op.type === 'trim_start' || op.type === 'trim_end') {
+        removed.push([Math.max(0, start), Math.min(dur, end)]);
+      }
+    }
+
+    // Merge overlapping removed intervals
+    removed.sort((a, b) => a[0] - b[0]);
+    const merged: [number, number][] = [];
+    for (const [s, e] of removed) {
+      if (merged.length > 0 && s <= merged[merged.length - 1][1]) {
+        merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
+      } else {
+        merged.push([s, e]);
+      }
+    }
+
+    // Inverse → kept segments
+    const kept: [number, number][] = [];
+    let pos = 0;
+    for (const [s, e] of merged) {
+      if (pos < s) kept.push([pos, s]);
+      pos = e;
+    }
+    if (pos < dur) kept.push([pos, dur]);
+
+    // Speed factor
+    const speedOp = [...appliedOps].reverse().find(op => op.type === 'speed');
+    const speedFactor = (speedOp?.params as any)?.factor ?? 1;
+
+    // Total kept duration / speed
+    const rawKeptDuration = kept.reduce((sum, [s, e]) => sum + (e - s), 0);
+    const editedDur = rawKeptDuration / speedFactor;
+
+    // Map source time → edited timeline position
+    const sourceToEdited = (sourceMs: number): number => {
+      let editedTime = 0;
+      for (const [s, e] of kept) {
+        if (sourceMs <= s) break;
+        if (sourceMs >= e) {
+          editedTime += (e - s);
+        } else {
+          editedTime += (sourceMs - s);
+          break;
+        }
+      }
+      return editedTime / speedFactor;
+    };
+
+    return { keptSegments: kept, editedDurationMs: editedDur, removedSegments: merged, sourceToEditedTime: sourceToEdited };
+  }, [appliedOps, effectiveDuration]);
+
   const timeToPercent = (ms: number) => (ms / effectiveDuration) * 100;
+
+  // Preview mode — pause at the end of last kept segment
+  useEffect(() => {
+    if (!previewMode || !videoRef.current || keptSegments.length === 0) return;
+    const video = videoRef.current;
+    const lastKept = keptSegments[keptSegments.length - 1];
+    const endOfEdit = lastKept[1]; // end of the last kept segment in source ms
+    const handlePreviewEnd = () => {
+      const t = video.currentTime * 1000;
+      if (t >= endOfEdit - 100) {
+        video.pause();
+        setIsPlaying(false);
+      }
+    };
+    video.addEventListener('timeupdate', handlePreviewEnd);
+    return () => video.removeEventListener('timeupdate', handlePreviewEnd);
+  }, [previewMode, keptSegments]);
+
   const formatTime = useCallback((ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m}:${s.toString().padStart(2, '0')}`;
+  }, []);
+
+  // -----------------------------------------------------------------------
+  // Timeline drag-to-seek handlers
+  // -----------------------------------------------------------------------
+  const seekToTimelinePosition = useCallback((clientX: number) => {
+    const ruler = timelineRulerRef.current;
+    if (!ruler || !videoRef.current || effectiveDuration <= 0) return;
+    const rect = ruler.getBoundingClientRect();
+    const px = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const pct = px / rect.width;
+    const seekMs = pct * effectiveDuration;
+    const seekSec = seekMs / 1000;
+    videoRef.current.currentTime = seekSec;
+    setCurrentTime(seekMs);
+  }, [effectiveDuration]);
+
+  const handleTimelineMouseDown = useCallback((e: React.MouseEvent) => {
+    setIsDraggingTimeline(true);
+    seekToTimelinePosition(e.clientX);
+  }, [seekToTimelinePosition]);
+
+  const handleTimelineMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDraggingTimeline) return;
+    seekToTimelinePosition(e.clientX);
+  }, [isDraggingTimeline, seekToTimelinePosition]);
+
+  const handleTimelineMouseUp = useCallback(() => {
+    setIsDraggingTimeline(false);
   }, []);
 
   // -----------------------------------------------------------------------
@@ -661,10 +780,10 @@ export default function EditorPage() {
         {/* Preview Panel */}
         <div className="flex-1 flex flex-col min-h-0">
           {/* Video Preview */}
-          <div className="flex-1 bg-black flex items-center justify-center relative min-h-[200px]">
+          <div className="flex-1 bg-black flex items-center justify-center relative min-h-[300px]">
             {videoUrl ? (
               /* Uploaded video player */
-              <div className="aspect-[9/16] max-h-full max-w-full bg-surface-2 rounded-lg relative overflow-hidden" style={{ height: '80%' }}>
+              <div className="aspect-[9/16] max-h-full max-w-full bg-surface-2 rounded-lg relative overflow-hidden" style={{ height: '95%' }}>
                 <video
                   ref={videoRef}
                   src={videoUrl}
@@ -729,10 +848,24 @@ export default function EditorPage() {
                       <button
                         className="text-[9px] px-1.5 py-0.5 rounded bg-white/20 text-white/80 font-medium pointer-events-auto cursor-pointer hover:bg-white/30 transition-colors"
                         title="Clear all edits"
-                        onClick={() => { editStack.clearAll(); setAppliedEffects([]); }}
+                        onClick={() => { editStack.clearAll(); setAppliedEffects([]); setPreviewMode(false); }}
                       >
                         Clear All
                       </button>
+                    </div>
+                  </div>
+                )}
+                {/* Edited duration badge */}
+                {appliedOps.length > 0 && editedDurationMs < effectiveDuration && (
+                  <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+                    <div className="glass rounded-full px-4 py-1.5 flex items-center gap-2">
+                      <Timer className="w-3.5 h-3.5 text-brand-400" />
+                      <span className="text-xs font-medium text-white/80">
+                        Edited: <span className="text-brand-400 font-bold">{formatTime(editedDurationMs)}</span>
+                      </span>
+                      <span className="text-[10px] text-white/30">
+                        / {formatTime(effectiveDuration)} original
+                      </span>
                     </div>
                   </div>
                 )}
@@ -741,7 +874,7 @@ export default function EditorPage() {
               /* Upload area */
               <div
                 className="aspect-[9/16] max-h-full max-w-full bg-surface-2 rounded-lg flex items-center justify-center relative overflow-hidden cursor-pointer group"
-                style={{ height: '80%' }}
+                style={{ height: '95%' }}
                 onClick={() => fileInputRef.current?.click()}
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
@@ -792,7 +925,11 @@ export default function EditorPage() {
 
             {/* Preview controls overlay */}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 glass rounded-full px-4 py-2">
-              <button className="text-white/60 hover:text-white transition-colors" onClick={() => { setCurrentTime(0); if (videoRef.current) videoRef.current.currentTime = 0; }}>
+              <button className="text-white/60 hover:text-white transition-colors" onClick={() => {
+                const startMs = previewMode && keptSegments.length > 0 ? keptSegments[0][0] : 0;
+                setCurrentTime(startMs);
+                if (videoRef.current) videoRef.current.currentTime = startMs / 1000;
+              }}>
                 <SkipBack className="w-4 h-4" />
               </button>
               <button
@@ -805,18 +942,90 @@ export default function EditorPage() {
                 <SkipForward className="w-4 h-4" />
               </button>
               <div className="w-px h-5 bg-white/10 mx-1" />
-              <span className="text-xs text-white/60 font-mono">{formatTime(currentTime)}</span>
+              <span className="text-xs text-white/60 font-mono">
+                {previewMode ? formatTime(sourceToEditedTime(currentTime)) : formatTime(currentTime)}
+              </span>
               <span className="text-xs text-white/20">/</span>
-              <span className="text-xs text-white/40 font-mono">{formatTime(effectiveDuration)}</span>
+              <span className="text-xs text-white/40 font-mono">
+                {previewMode ? formatTime(editedDurationMs) : formatTime(effectiveDuration)}
+              </span>
+              {/* Preview mode toggle */}
+              {appliedOps.length > 0 && editedDurationMs < effectiveDuration && (
+                <>
+                  <div className="w-px h-5 bg-white/10 mx-1" />
+                  <button
+                    className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium transition-all ${
+                      previewMode
+                        ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/30'
+                        : 'bg-white/10 text-white/50 hover:text-white/80 hover:bg-white/20'
+                    }`}
+                    onClick={() => setPreviewMode(!previewMode)}
+                    title={previewMode ? 'Exit preview — show source timeline' : 'Preview edited result'}
+                  >
+                    <Eye className="w-3 h-3" />
+                    {previewMode ? formatTime(editedDurationMs) : 'Preview'}
+                  </button>
+                </>
+              )}
               <div className="w-px h-5 bg-white/10 mx-1" />
               <button className="text-white/60 hover:text-white transition-colors" onClick={() => setIsMuted(!isMuted)}>
                 {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
             </div>
+
+            {/* Scrub bar — thin draggable progress bar */}
+            <div
+              className="h-2 bg-surface-3/50 cursor-pointer relative group hover:h-3 transition-all"
+              onMouseDown={(e) => {
+                const bar = e.currentTarget;
+                const rect = bar.getBoundingClientRect();
+                const pct = Math.max(0, Math.min((e.clientX - rect.left) / rect.width, 1));
+                const seekMs = pct * effectiveDuration;
+                if (videoRef.current) videoRef.current.currentTime = seekMs / 1000;
+                setCurrentTime(seekMs);
+                setIsDraggingTimeline(true);
+                const handleMove = (ev: MouseEvent) => {
+                  const r = bar.getBoundingClientRect();
+                  const p = Math.max(0, Math.min((ev.clientX - r.left) / r.width, 1));
+                  const ms = p * effectiveDuration;
+                  if (videoRef.current) videoRef.current.currentTime = ms / 1000;
+                  setCurrentTime(ms);
+                };
+                const handleUp = () => {
+                  setIsDraggingTimeline(false);
+                  window.removeEventListener('mousemove', handleMove);
+                  window.removeEventListener('mouseup', handleUp);
+                };
+                window.addEventListener('mousemove', handleMove);
+                window.addEventListener('mouseup', handleUp);
+              }}
+            >
+              {/* Progress fill */}
+              <div
+                className="absolute top-0 left-0 bottom-0 bg-brand-400/80 rounded-r transition-none"
+                style={{ width: `${effectiveDuration > 0 ? (currentTime / effectiveDuration) * 100 : 0}%` }}
+              />
+              {/* Scrub handle */}
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-brand-400 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+                style={{ left: `calc(${effectiveDuration > 0 ? (currentTime / effectiveDuration) * 100 : 0}% - 6px)` }}
+              />
+              {/* Cut region indicators on scrub bar */}
+              {removedSegments.map(([rs, re], ri) => (
+                <div
+                  key={ri}
+                  className="absolute top-0 bottom-0 bg-red-500/40 pointer-events-none"
+                  style={{
+                    left: `${(rs / effectiveDuration) * 100}%`,
+                    width: `${((re - rs) / effectiveDuration) * 100}%`,
+                  }}
+                />
+              ))}
+            </div>
           </div>
 
           {/* Timeline */}
-          <div className="h-32 md:h-48 bg-surface-1 border-t border-surface-4/50 flex flex-col shrink-0">
+          <div className="h-32 md:h-48 bg-surface-1 border-t border-surface-4/50 flex flex-col shrink-0" ref={timelineRef}>
             {/* Timeline header */}
             <div className="h-8 border-b border-surface-4/30 flex items-center px-4 justify-between shrink-0">
               <div className="flex items-center gap-4">
@@ -829,28 +1038,55 @@ export default function EditorPage() {
                   ))}
                 </div>
               </div>
-              <span className="text-[10px] text-white/30 font-mono">{formatTime(currentTime)} / {formatTime(effectiveDuration)}</span>
+              <span className="text-[10px] text-white/30 font-mono">
+                {previewMode ? formatTime(sourceToEditedTime(currentTime)) : formatTime(currentTime)} / {previewMode ? formatTime(editedDurationMs) : formatTime(effectiveDuration)}
+                {previewMode && <span className="ml-1 text-brand-400">(preview)</span>}
+              </span>
             </div>
 
-            {/* Timeline ruler */}
-            <div className="h-5 border-b border-surface-4/20 flex items-end px-4 shrink-0 relative overflow-hidden">
+            {/* Timeline ruler — click/drag to seek */}
+            <div
+              className="h-5 border-b border-surface-4/20 flex items-end px-4 shrink-0 relative overflow-hidden cursor-pointer select-none"
+              onMouseDown={handleTimelineMouseDown}
+              onMouseMove={handleTimelineMouseMove}
+              onMouseUp={handleTimelineMouseUp}
+              onMouseLeave={handleTimelineMouseUp}
+              ref={timelineRulerRef}
+            >
               {Array.from({ length: Math.ceil(effectiveDuration / 5000) }, (_, i) => (
-                <div key={i} className="absolute bottom-0" style={{ left: `${(i * 5000 / effectiveDuration) * 100}%` }}>
+                <div key={i} className="absolute bottom-0 pointer-events-none" style={{ left: `${(i * 5000 / effectiveDuration) * 100}%` }}>
                   <div className="h-2 w-px bg-white/10" />
                   <span className="text-[8px] text-white/20 ml-0.5">{formatTime(i * 5000)}</span>
                 </div>
               ))}
               {/* Playhead */}
               <div
-                className="absolute top-0 bottom-0 w-px bg-brand-400 z-10"
+                className="absolute top-0 bottom-0 w-px bg-brand-400 z-10 pointer-events-none"
                 style={{ left: `${timeToPercent(currentTime)}%` }}
               >
                 <div className="w-2.5 h-2.5 bg-brand-400 rounded-full -ml-[5px] -mt-0.5" />
               </div>
             </div>
 
-            {/* Track lanes */}
-            <div className="flex-1 overflow-y-auto px-4 py-1 space-y-1">
+            {/* Track lanes — click to seek */}
+            <div
+              className="flex-1 overflow-y-auto px-4 py-1 space-y-1 cursor-pointer select-none"
+              onMouseDown={(e) => {
+                // Use ruler ref for bounds calculation (same horizontal space)
+                const ruler = timelineRulerRef.current;
+                if (!ruler || !videoRef.current || effectiveDuration <= 0) return;
+                const rect = ruler.getBoundingClientRect();
+                const px = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+                const pct = px / rect.width;
+                const seekMs = pct * effectiveDuration;
+                videoRef.current.currentTime = seekMs / 1000;
+                setCurrentTime(seekMs);
+                setIsDraggingTimeline(true);
+              }}
+              onMouseMove={(e) => { if (isDraggingTimeline) seekToTimelinePosition(e.clientX); }}
+              onMouseUp={handleTimelineMouseUp}
+              onMouseLeave={handleTimelineMouseUp}
+            >
               {[
                 { name: 'Video', icon: Film, color: 'bg-blue-500/20 border-blue-500/30', activeColor: 'bg-blue-500/50 border-blue-500/60', types: ['trim_silence', 'speed_ramp', 'zoom', 'aspect_ratio', 'reorder'] },
                 { name: 'Audio', icon: Volume2, color: 'bg-emerald-500/20 border-emerald-500/30', activeColor: 'bg-emerald-500/50 border-emerald-500/60', types: ['loudness', 'sfx_trigger'] },
@@ -878,7 +1114,7 @@ export default function EditorPage() {
                       <span className={`text-[10px] ${isApplied ? 'text-white/70 font-medium' : 'text-white/40'}`}>{track.name}</span>
                     </div>
                     <div className={`flex-1 h-full rounded border ${isApplied ? track.activeColor : track.color} relative`}>
-                      {/* Cut marker */}
+                      {/* Manual cut selection marker */}
                       {track.name === 'Video' && cutRange && (
                         <div
                           className="absolute top-0 bottom-0 bg-red-500/30 border-x border-red-500/50"
@@ -889,6 +1125,21 @@ export default function EditorPage() {
                           title={`Cut: ${formatTime(cutRange.startMs)}–${formatTime(cutRange.endMs)}`}
                         />
                       )}
+                      {/* Removed regions from all cuts/trims — red hatched overlay */}
+                      {track.name === 'Video' && removedSegments.map(([rs, re], ri) => (
+                        <div
+                          key={`removed-${ri}`}
+                          className="absolute top-0 bottom-0 bg-red-500/25 border-x border-red-500/40 z-[1]"
+                          style={{
+                            left: `${(rs / effectiveDuration) * 100}%`,
+                            width: `${((re - rs) / effectiveDuration) * 100}%`,
+                            backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(239,68,68,0.15) 3px, rgba(239,68,68,0.15) 6px)',
+                          }}
+                          title={`Removed: ${formatTime(rs)}–${formatTime(re)}`}
+                        >
+                          <span className="text-[6px] text-red-400/80 font-bold absolute inset-0 flex items-center justify-center overflow-hidden">CUT</span>
+                        </div>
+                      ))}
                       {/* Strategy operation blocks */}
                       {ops.map((op: any, i: number) => (
                         <div
