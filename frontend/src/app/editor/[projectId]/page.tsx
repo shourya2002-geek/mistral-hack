@@ -40,11 +40,26 @@ export default function EditorPage() {
   const [generating, setGenerating] = useState(false);
   const [applying, setApplying] = useState(false);
 
+  // Applied state — tracks what's visible on the timeline & video
+  const [appliedStrategy, setAppliedStrategy] = useState<any>(null);
+  const [appliedEffects, setAppliedEffects] = useState<string[]>([]);
+
+  // Edit history for undo / redo
+  const [editHistory, setEditHistory] = useState<any[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
+  // Clipboard for cut
+  const [cutRange, setCutRange] = useState<{ startMs: number; endMs: number } | null>(null);
+
   // AI Chat
   const [chatMessages, setChatMessages] = useState<Array<{ role: string; text: string }>>([
-    { role: 'assistant', text: 'Hi! I\'m your AI editing assistant. Describe what you want and I\'ll generate an editing strategy. Try something like "make it fast-paced with hard cuts and bold captions".' },
+    { role: 'assistant', text: 'Hi! I\'m your VIRCUT AI editor powered by Mistral. Tell me what you want to do with your video — I\'ll edit it for you. Try: "cut the first 3 seconds" or "add captions" or "make it cinematic".' },
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [conversationId] = useState(() => `conv_${Date.now()}`);
+
+  // AI-applied operations (from chat/voice) — shown on timeline
+  const [appliedOps, setAppliedOps] = useState<any[]>([]);
 
   // Voice
   const voice = useVoiceWebSocket();
@@ -190,8 +205,166 @@ export default function EditorPage() {
   }, [isMuted]);
 
   // -----------------------------------------------------------------------
-  // Strategy generation
+  // Apply AI operations to actual video element
   // -----------------------------------------------------------------------
+  // Helper: find last matching op (ES2017-safe)
+  const findLastOp = (predicate: (op: any) => boolean) => {
+    for (let i = appliedOps.length - 1; i >= 0; i--) {
+      if (predicate(appliedOps[i])) return appliedOps[i];
+    }
+    return undefined;
+  };
+
+  // Speed changes
+  useEffect(() => {
+    if (!videoRef.current) return;
+    const speedOp = findLastOp((op: any) => op.type === 'speed');
+    videoRef.current.playbackRate = speedOp?.params?.factor ?? 1;
+  }, [appliedOps]);
+
+  // Volume changes
+  useEffect(() => {
+    if (!videoRef.current) return;
+    const volOp = findLastOp((op: any) => op.type === 'volume');
+    if (volOp) {
+      videoRef.current.volume = Math.min(1, Math.max(0, volOp.params?.level ?? 1));
+    }
+  }, [appliedOps]);
+
+  // Trim start — seek past the trimmed region on load/apply
+  useEffect(() => {
+    if (!videoRef.current) return;
+    const trimOp = findLastOp((op: any) => op.type === 'trim_start');
+    if (trimOp && videoRef.current.currentTime * 1000 < (trimOp._endMs ?? trimOp.endMs ?? 0)) {
+      videoRef.current.currentTime = (trimOp._endMs ?? trimOp.endMs ?? 0) / 1000;
+    }
+  }, [appliedOps]);
+
+  // Cut regions — skip during playback
+  useEffect(() => {
+    if (!videoRef.current) return;
+    const cutOps = appliedOps.filter((op: any) => op.type === 'cut');
+    if (cutOps.length === 0) return;
+    const video = videoRef.current;
+    const handleTimeUpdate = () => {
+      const t = video.currentTime * 1000;
+      for (const op of cutOps) {
+        const start = op._startMs ?? op.startMs ?? 0;
+        const end = op._endMs ?? op.endMs ?? 0;
+        if (t >= start && t < end) {
+          video.currentTime = end / 1000;
+          break;
+        }
+      }
+    };
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    return () => video.removeEventListener('timeupdate', handleTimeUpdate);
+  }, [appliedOps]);
+
+  // Compute active zoom level based on current time
+  const activeZoomLevel = (() => {
+    const t = currentTime;
+    const zoomOp = findLastOp((op: any) => {
+      if (op.type !== 'zoom') return false;
+      const start = op._startMs ?? op.startMs ?? 0;
+      const end = op._endMs ?? op.endMs ?? effectiveDuration;
+      return t >= start && t <= end;
+    });
+    return zoomOp?.params?.level ?? 1;
+  })();
+
+  // Compute active caption based on current time
+  const activeCaption = (() => {
+    const t = currentTime;
+    const capOp = findLastOp((op: any) => {
+      if (op.type !== 'caption') return false;
+      const start = op._startMs ?? op.startMs ?? 0;
+      const end = op._endMs ?? op.endMs ?? effectiveDuration;
+      return t >= start && t <= end;
+    });
+    return capOp?.params?.text ?? null;
+  })();
+
+  // Compute active color grade
+  const activeColorPreset = (() => {
+    const t = currentTime;
+    const cgOp = findLastOp((op: any) => {
+      if (op.type !== 'color_grade') return false;
+      const start = op._startMs ?? op.startMs ?? 0;
+      const end = op._endMs ?? op.endMs ?? effectiveDuration;
+      return t >= start && t <= end;
+    });
+    return cgOp?.params?.preset ?? null;
+  })();
+
+  // CSS filter for color grades
+  const videoFilterStyle = (() => {
+    switch (activeColorPreset) {
+      case 'warm': return 'sepia(0.25) saturate(1.2) brightness(1.05)';
+      case 'cool': return 'saturate(0.9) hue-rotate(15deg) brightness(1.05)';
+      case 'vintage': return 'sepia(0.4) contrast(1.1) brightness(0.95)';
+      case 'cinematic': return 'contrast(1.15) saturate(0.85) brightness(0.9)';
+      case 'vibrant': return 'saturate(1.5) contrast(1.1) brightness(1.05)';
+      default: return 'none';
+    }
+  })();
+
+  // -----------------------------------------------------------------------
+  // AI Chat — sends messages to Mistral via /api/v1/chat
+  // -----------------------------------------------------------------------
+  const sendToAI = async (text: string) => {
+    if (!text.trim()) return;
+    setGenerating(true);
+    setChatMessages(prev => [...prev, { role: 'user', text }]);
+    try {
+      const result = await api.chat({
+        conversationId,
+        message: text,
+        videoDurationMs: effectiveDuration,
+        platform: project?.platform ?? 'tiktok',
+      });
+
+      // Show AI response in chat
+      setChatMessages(prev => [...prev, { role: 'assistant', text: result.message }]);
+
+      // If the AI returned operations, apply them
+      if (result.operations && result.operations.length > 0) {
+        const newOps = result.operations.map((op: any) => ({
+          ...op,
+          _startMs: op.startMs ?? 0,
+          _endMs: op.endMs ?? effectiveDuration,
+        }));
+        setAppliedOps(prev => [...prev, ...newOps]);
+        setAppliedEffects(prev => {
+          const newTypes = newOps.map((o: any) => o.type);
+          return [...new Set([...prev, ...newTypes])];
+        });
+        // Push to undo history
+        pushHistory(result.strategyName ?? 'AI edit', { ops: newOps, effects: newOps.map((o: any) => o.type) });
+        // Log in chat
+        const opSummary = newOps.map((o: any) => `${o.type} (${formatTime(o._startMs)}–${formatTime(o._endMs)})`).join(', ');
+        setChatMessages(prev => [...prev, { role: 'assistant', text: `✅ Applied: ${opSummary}` }]);
+      }
+    } catch (err: any) {
+      setChatMessages(prev => [...prev, { role: 'assistant', text: `Error: ${err.message}` }]);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleChatSend = () => {
+    if (!chatInput.trim()) return;
+    sendToAI(chatInput);
+    setChatInput('');
+  };
+
+  const handleIntentSubmit = () => {
+    if (!intent.trim()) return;
+    sendToAI(intent);
+    setIntent('');
+  };
+
+  // Legacy: generate strategy via rule engine (kept for Strategy tab presets)
   const generateStrategy = async (intentText: string) => {
     if (!intentText.trim()) return;
     setGenerating(true);
@@ -202,32 +375,11 @@ export default function EditorPage() {
         platform: project?.platform ?? 'tiktok',
       });
       setStrategy(result);
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'user', text: intentText },
-        { role: 'assistant', text: `Strategy generated! ${result.strategy?.operations?.length ?? 0} operations planned with ${((result.strategy?.metadata?.confidenceScore ?? 0) * 100).toFixed(0)}% confidence. Operations include: ${result.strategy?.operations?.slice(0, 3).map((op: any) => op.type).join(', ') ?? 'N/A'}${(result.strategy?.operations?.length ?? 0) > 3 ? '...' : ''}` },
-      ]);
     } catch (err: any) {
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'user', text: intentText },
-        { role: 'assistant', text: `Error: ${err.message}` },
-      ]);
+      setChatMessages(prev => [...prev, { role: 'assistant', text: `Error: ${err.message}` }]);
     } finally {
       setGenerating(false);
     }
-  };
-
-  const handleChatSend = () => {
-    if (!chatInput.trim()) return;
-    generateStrategy(chatInput);
-    setChatInput('');
-  };
-
-  const handleIntentSubmit = () => {
-    if (!intent.trim()) return;
-    generateStrategy(intent);
-    setIntent('');
   };
 
   // -----------------------------------------------------------------------
@@ -237,23 +389,130 @@ export default function EditorPage() {
     if (voice.commands.length > 0) {
       const latest = voice.commands[voice.commands.length - 1];
       if (latest && latest.text && !latest.text.startsWith('[feedback]')) {
-        // Automatically generate strategy from voice command
-        generateStrategy(latest.text);
+        // Send voice command to AI chat (same as typing)
+        sendToAI(latest.text);
       }
     }
   }, [voice.commands.length]);
 
   // -----------------------------------------------------------------------
-  // Helpers
+  // Helpers (must be before handlers that use them)
   // -----------------------------------------------------------------------
   const effectiveDuration = videoDuration > 0 ? videoDuration : duration;
   const timeToPercent = (ms: number) => (ms / effectiveDuration) * 100;
-  const formatTime = (ms: number) => {
+  const formatTime = useCallback((ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+  }, []);
+
+  // -----------------------------------------------------------------------
+  // Undo / Redo
+  // -----------------------------------------------------------------------
+  const pushHistory = useCallback((label: string, data: any) => {
+    setEditHistory(prev => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      return [...trimmed, { label, data, timestamp: Date.now() }];
+    });
+    setHistoryIndex(prev => prev + 1);
+  }, [historyIndex]);
+
+  const handleUndo = useCallback(() => {
+    if (historyIndex < 0) return;
+    const entry = editHistory[historyIndex];
+    // Remove the ops from this entry
+    if (entry?.data?.ops) {
+      setAppliedOps(prev => {
+        const opsToRemove = entry.data.ops;
+        // Remove the last N ops matching this entry
+        const result = [...prev];
+        for (let k = opsToRemove.length - 1; k >= 0; k--) {
+          const idx = result.lastIndexOf(opsToRemove[k]);
+          if (idx >= 0) result.splice(idx, 1);
+        }
+        return result;
+      });
+    }
+    if (entry?.data?.strategy) {
+      setAppliedStrategy(null);
+    }
+    // Recompute applied effects from remaining ops
+    setAppliedEffects(prev => {
+      // Will be recomputed from appliedOps
+      return prev;
+    });
+    setHistoryIndex(prev => prev - 1);
+    setChatMessages(prev => [...prev, { role: 'assistant', text: `↩️ Undid: ${entry?.label ?? 'action'}` }]);
+  }, [historyIndex, editHistory]);
+
+  const handleRedo = useCallback(() => {
+    if (historyIndex >= editHistory.length - 1) return;
+    const entry = editHistory[historyIndex + 1];
+    if (entry?.data?.ops) {
+      setAppliedOps(prev => [...prev, ...entry.data.ops]);
+    }
+    if (entry?.data?.strategy) {
+      setAppliedStrategy(entry.data.strategy);
+      setAppliedEffects(entry.data.effects ?? []);
+    }
+    setHistoryIndex(prev => prev + 1);
+    setChatMessages(prev => [...prev, { role: 'assistant', text: `↪️ Redid: ${entry?.label ?? 'action'}` }]);
+  }, [historyIndex, editHistory]);
+
+  const handleCut = useCallback(() => {
+    if (!videoRef.current) return;
+    const t = videoRef.current.currentTime * 1000;
+    const cutStart = Math.max(0, t - 1000);
+    const cutEnd = Math.min(effectiveDuration, t + 1000);
+    setCutRange({ startMs: cutStart, endMs: cutEnd });
+    setChatMessages(prev => [...prev, { role: 'assistant', text: `Cut marker set at ${formatTime(cutStart)}–${formatTime(cutEnd)}` }]);
+  }, [effectiveDuration]);
+
+  const handleSplit = useCallback(() => {
+    if (!videoRef.current) return;
+    const t = videoRef.current.currentTime * 1000;
+    setChatMessages(prev => [...prev, { role: 'assistant', text: `Split point added at ${formatTime(t)}` }]);
+  }, []);
+
+  // Build timeline-friendly operations from strategy
+  const timelineOps = useCallback((strat: any) => {
+    const ops = strat?.strategy?.operations ?? [];
+    const dur = effectiveDuration;
+    return ops.map((op: any, i: number) => {
+      // Since operations don't have timeRange, compute placement based on type
+      const count = ops.length;
+      const sliceMs = dur / Math.max(count, 1);
+      let startMs = 0;
+      let endMs = dur;
+      // Distribute operations across the timeline for visualization
+      if (op.type === 'trim_silence') {
+        // Spread across full duration — silence trimming is global
+        startMs = 0; endMs = dur;
+      } else if (op.type === 'caption') {
+        startMs = 0; endMs = dur; // captions span full video
+      } else if (op.type === 'zoom') {
+        // Show zoom as segments in first half
+        startMs = dur * 0.1; endMs = dur * 0.6;
+      } else if (op.type === 'speed_ramp') {
+        startMs = dur * 0.2; endMs = dur * 0.8;
+      } else if (op.type === 'sfx_trigger') {
+        startMs = dur * 0.05; endMs = dur * 0.95;
+      } else if (op.type === 'music_layer') {
+        startMs = 0; endMs = dur;
+      } else if (op.type === 'color_grade') {
+        startMs = 0; endMs = dur;
+      } else if (op.type === 'aspect_ratio') {
+        startMs = 0; endMs = dur;
+      } else if (op.type === 'loudness') {
+        startMs = 0; endMs = dur;
+      } else {
+        startMs = i * sliceMs;
+        endMs = startMs + sliceMs;
+      }
+      return { ...op, _startMs: startMs, _endMs: endMs };
+    });
+  }, [effectiveDuration]);
 
   // -----------------------------------------------------------------------
   // Loading / Error states
@@ -294,11 +553,11 @@ export default function EditorPage() {
           <div className="w-px h-5 bg-surface-4 mx-1" />
           <span className="text-xs text-white/50 font-medium truncate max-w-[120px] md:max-w-[200px]">{project?.name ?? 'Untitled'}</span>
           <div className="w-px h-5 bg-surface-4 mx-1 hidden sm:block" />
-          <button className="btn-ghost p-2" title="Undo"><Undo2 className="w-4 h-4" /></button>
-          <button className="btn-ghost p-2" title="Redo"><Redo2 className="w-4 h-4" /></button>
+          <button onClick={handleUndo} disabled={historyIndex < 0} className="btn-ghost p-2 disabled:opacity-30" title="Undo"><Undo2 className="w-4 h-4" /></button>
+          <button onClick={handleRedo} disabled={historyIndex >= editHistory.length - 1} className="btn-ghost p-2 disabled:opacity-30" title="Redo"><Redo2 className="w-4 h-4" /></button>
           <div className="w-px h-5 bg-surface-4 mx-1 hidden sm:block" />
-          <button className="btn-ghost p-2 hidden sm:inline-flex" title="Cut"><Scissors className="w-4 h-4" /></button>
-          <button className="btn-ghost p-2 hidden sm:inline-flex" title="Split"><SplitSquareHorizontal className="w-4 h-4" /></button>
+          <button onClick={handleCut} className="btn-ghost p-2 hidden sm:inline-flex" title="Cut at playhead"><Scissors className="w-4 h-4" /></button>
+          <button onClick={handleSplit} className="btn-ghost p-2 hidden sm:inline-flex" title="Split at playhead"><SplitSquareHorizontal className="w-4 h-4" /></button>
           <div className="w-px h-5 bg-surface-4 mx-1 hidden sm:block" />
           <button className="btn-ghost p-2 hidden md:inline-flex" title="Zoom In" onClick={() => setZoom(z => Math.min(z * 1.5, 5))}><ZoomIn className="w-4 h-4" /></button>
           <button className="btn-ghost p-2 hidden md:inline-flex" title="Zoom Out" onClick={() => setZoom(z => Math.max(z / 1.5, 0.2))}><ZoomOut className="w-4 h-4" /></button>
@@ -361,18 +620,53 @@ export default function EditorPage() {
                 <video
                   ref={videoRef}
                   src={videoUrl}
-                  className="w-full h-full object-contain"
+                  className="w-full h-full object-contain transition-transform duration-300"
+                  style={{
+                    transform: activeZoomLevel !== 1 ? `scale(${activeZoomLevel})` : undefined,
+                    filter: videoFilterStyle !== 'none' ? videoFilterStyle : undefined,
+                  }}
                   onTimeUpdate={(e) => setCurrentTime((e.currentTarget.currentTime) * 1000)}
                   onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration * 1000)}
                   onEnded={() => setIsPlaying(false)}
                   playsInline
                 />
-                {/* Caption overlay mockup */}
-                {strategy && (
-                  <div className="absolute bottom-8 left-4 right-4 text-center z-10">
-                    <p className="text-sm font-bold text-white drop-shadow-lg bg-black/40 rounded px-2 py-1 inline-block">
-                      &quot;Your AI-generated captions appear here&quot;
+                {/* Time-aware caption overlay */}
+                {activeCaption && (
+                  <div className="absolute bottom-8 left-4 right-4 text-center z-10 pointer-events-none">
+                    <p className="text-sm font-bold text-white drop-shadow-lg bg-black/50 rounded px-3 py-1.5 inline-block">
+                      {activeCaption}
                     </p>
+                  </div>
+                )}
+                {/* Compact status bar — single row, no overlap */}
+                {appliedOps.length > 0 && (
+                  <div className="absolute top-2 left-2 right-2 z-10 pointer-events-none">
+                    <div className="flex flex-wrap gap-1 max-w-full">
+                      {[...new Set(appliedOps.map(op => op.type))].map(t => {
+                        const op = [...appliedOps].reverse().find((o: any) => o.type === t);
+                        let label = t.replace('_', ' ');
+                        if (t === 'speed') label = `${op?.params?.factor ?? 1}× speed`;
+                        if (t === 'cut') label = `cut ${formatTime(op?._startMs ?? 0)}–${formatTime(op?._endMs ?? 0)}`;
+                        if (t === 'trim_start') label = `trim ${formatTime(op?._endMs ?? 0)}`;
+                        if (t === 'zoom') label = `${op?.params?.level ?? 1}× zoom`;
+                        if (t === 'volume') label = `vol ${Math.round((op?.params?.level ?? 1) * 100)}%`;
+                        if (t === 'color_grade') label = `${op?.params?.preset ?? 'grade'}`;
+                        if (t === 'caption') label = 'captions';
+                        const colors: Record<string, string> = {
+                          cut: 'bg-red-500/80', trim_start: 'bg-red-500/80', trim_end: 'bg-red-500/80',
+                          speed: 'bg-purple-500/80', zoom: 'bg-blue-500/80',
+                          volume: 'bg-emerald-500/80', color_grade: 'bg-amber-500/80',
+                          caption: 'bg-amber-500/80', music: 'bg-pink-500/80',
+                          fade_in: 'bg-indigo-500/80', fade_out: 'bg-indigo-500/80',
+                          silence_remove: 'bg-teal-500/80',
+                        };
+                        return (
+                          <span key={t} className={`text-[9px] px-1.5 py-0.5 rounded ${colors[t] ?? 'bg-brand-500/80'} text-white font-medium`}>
+                            {label}
+                          </span>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -491,41 +785,65 @@ export default function EditorPage() {
             {/* Track lanes */}
             <div className="flex-1 overflow-y-auto px-4 py-1 space-y-1">
               {[
-                { name: 'Video', icon: Film, color: 'bg-blue-500/20 border-blue-500/30' },
-                { name: 'Audio', icon: Volume2, color: 'bg-emerald-500/20 border-emerald-500/30' },
-                { name: 'Captions', icon: Type, color: 'bg-amber-500/20 border-amber-500/30' },
-                { name: 'Music', icon: Music, color: 'bg-pink-500/20 border-pink-500/30' },
-                { name: 'Effects', icon: Sparkles, color: 'bg-brand-500/20 border-brand-500/30' },
-              ].map((track) => (
-                <div key={track.name} className="flex items-center gap-2 h-7">
-                  <div className="w-20 flex items-center gap-1.5 shrink-0">
-                    <track.icon className="w-3 h-3 text-white/30" />
-                    <span className="text-[10px] text-white/40">{track.name}</span>
-                  </div>
-                  <div className={`flex-1 h-full rounded border ${track.color} relative`}>
-                    {/* Show strategy operations as blocks */}
-                    {strategy?.strategy?.operations
-                      ?.filter((op: any) => {
-                        if (track.name === 'Video') return ['cut', 'trim', 'speed_ramp', 'zoom'].includes(op.type);
-                        if (track.name === 'Captions') return op.type === 'caption_add';
-                        if (track.name === 'Audio') return ['audio_ducking', 'audio_fade'].includes(op.type);
-                        if (track.name === 'Effects') return ['transition', 'effect_overlay'].includes(op.type);
-                        return false;
-                      })
-                      .map((op: any, i: number) => (
+                { name: 'Video', icon: Film, color: 'bg-blue-500/20 border-blue-500/30', activeColor: 'bg-blue-500/50 border-blue-500/60', types: ['trim_silence', 'speed_ramp', 'zoom', 'aspect_ratio', 'reorder'] },
+                { name: 'Audio', icon: Volume2, color: 'bg-emerald-500/20 border-emerald-500/30', activeColor: 'bg-emerald-500/50 border-emerald-500/60', types: ['loudness', 'sfx_trigger'] },
+                { name: 'Captions', icon: Type, color: 'bg-amber-500/20 border-amber-500/30', activeColor: 'bg-amber-500/50 border-amber-500/60', types: ['caption'] },
+                { name: 'Music', icon: Music, color: 'bg-pink-500/20 border-pink-500/30', activeColor: 'bg-pink-500/50 border-pink-500/60', types: ['music_layer'] },
+                { name: 'Effects', icon: Sparkles, color: 'bg-brand-500/20 border-brand-500/30', activeColor: 'bg-brand-500/50 border-brand-500/60', types: ['color_grade'] },
+              ].map((track) => {
+                // Merge AI chat ops + legacy strategy ops
+                const legacyStrat = appliedStrategy ?? strategy;
+                const stratOps = legacyStrat ? timelineOps(legacyStrat).filter((op: any) => track.types.includes(op.type)) : [];
+                const chatOps = appliedOps.filter((op: any) => {
+                  if (track.name === 'Video') return ['cut', 'trim_start', 'trim_end', 'zoom', 'speed', 'split', 'fade_in', 'fade_out', 'trim_silence', 'speed_ramp', 'aspect_ratio'].includes(op.type);
+                  if (track.name === 'Audio') return ['volume', 'silence_remove', 'loudness', 'sfx_trigger'].includes(op.type);
+                  if (track.name === 'Captions') return ['caption'].includes(op.type);
+                  if (track.name === 'Music') return ['music', 'music_layer'].includes(op.type);
+                  if (track.name === 'Effects') return ['color_grade', 'fade_in', 'fade_out'].includes(op.type);
+                  return false;
+                });
+                const ops = [...stratOps, ...chatOps];
+                const isApplied = ops.length > 0;
+                return (
+                  <div key={track.name} className="flex items-center gap-2 h-7">
+                    <div className="w-20 flex items-center gap-1.5 shrink-0">
+                      <track.icon className={`w-3 h-3 ${isApplied ? 'text-white/70' : 'text-white/30'}`} />
+                      <span className={`text-[10px] ${isApplied ? 'text-white/70 font-medium' : 'text-white/40'}`}>{track.name}</span>
+                    </div>
+                    <div className={`flex-1 h-full rounded border ${isApplied ? track.activeColor : track.color} relative`}>
+                      {/* Cut marker */}
+                      {track.name === 'Video' && cutRange && (
+                        <div
+                          className="absolute top-0 bottom-0 bg-red-500/30 border-x border-red-500/50"
+                          style={{
+                            left: `${(cutRange.startMs / effectiveDuration) * 100}%`,
+                            width: `${((cutRange.endMs - cutRange.startMs) / effectiveDuration) * 100}%`,
+                          }}
+                          title={`Cut: ${formatTime(cutRange.startMs)}–${formatTime(cutRange.endMs)}`}
+                        />
+                      )}
+                      {/* Strategy operation blocks */}
+                      {ops.map((op: any, i: number) => (
                         <div
                           key={i}
-                          className={`absolute top-0.5 bottom-0.5 rounded-sm ${track.color} opacity-60`}
+                          className={`absolute top-0.5 bottom-0.5 rounded-sm ${isApplied ? track.activeColor : track.color} ${isApplied ? 'opacity-90' : 'opacity-40'} transition-all duration-500`}
                           style={{
-                            left: `${(op.timeRange?.startMs ?? i * 5000) / duration * 100}%`,
-                            width: `${Math.max(((op.timeRange?.endMs ?? (i * 5000 + 3000)) - (op.timeRange?.startMs ?? i * 5000)) / duration * 100, 2)}%`,
+                            left: `${(op._startMs / effectiveDuration) * 100}%`,
+                            width: `${Math.max(((op._endMs - op._startMs) / effectiveDuration) * 100, 3)}%`,
                           }}
-                          title={`${op.type}: ${formatTime(op.timeRange?.startMs ?? 0)}`}
-                        />
+                          title={`${op.type}: ${formatTime(op._startMs)}–${formatTime(op._endMs)}`}
+                        >
+                          {isApplied && (
+                            <span className="text-[7px] text-white/80 font-medium truncate px-0.5 leading-none absolute inset-0 flex items-center">
+                              {op.type.replace('_', ' ')}
+                            </span>
+                          )}
+                        </div>
                       ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -667,7 +985,13 @@ export default function EditorPage() {
                             setApplying(true);
                             try {
                               const res = await api.applyStrategy(strategy.id);
-                              setChatMessages((prev) => [...prev, { role: 'assistant', text: `Strategy applied! ${res.operationCount ?? 0} operations executed.` }]);
+                              // Mark strategy as applied — this updates the timeline & video overlays
+                              setAppliedStrategy(strategy);
+                              const effectTypes = (strategy.strategy?.operations ?? []).map((op: any) => op.type);
+                              setAppliedEffects(effectTypes);
+                              // Push to edit history for undo
+                              pushHistory('Apply strategy', { strategy, effects: effectTypes });
+                              setChatMessages((prev) => [...prev, { role: 'assistant', text: `✅ Strategy applied! ${res.operationCount ?? 0} operations executed. Timeline and video updated with: ${effectTypes.join(', ')}` }]);
                             } catch (err: any) {
                               setChatMessages((prev) => [...prev, { role: 'assistant', text: `Apply failed: ${err.message}` }]);
                             } finally {
@@ -740,10 +1064,10 @@ export default function EditorPage() {
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleChatSend()}
-                      placeholder="Describe your edit..."
+                      placeholder="Tell me what to edit... e.g. 'cut the first 3 seconds'"
                     />
-                    <button onClick={handleChatSend} className="btn-primary px-3 py-2">
-                      <Send className="w-3.5 h-3.5" />
+                    <button onClick={handleChatSend} disabled={generating} className="btn-primary px-3 py-2 disabled:opacity-50">
+                      {generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>

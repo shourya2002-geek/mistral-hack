@@ -144,6 +144,19 @@ class ApiClient {
     });
   }
 
+  // --- Chat (Mistral AI) ---
+  async chat(data: {
+    conversationId?: string;
+    message: string;
+    videoDurationMs?: number;
+    platform?: string;
+  }): Promise<{ message: string; operations: any[]; strategyName?: string }> {
+    return this.request<{ message: string; operations: any[]; strategyName?: string }>('/chat', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // --- Render ---
   async submitRender(data: {
     projectId: string;

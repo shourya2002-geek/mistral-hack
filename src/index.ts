@@ -44,6 +44,7 @@ import {
   ExperimentService,
   MetricsService,
 } from './services/index.js';
+import { ChatService } from './services/chatService.js';
 
 // API
 import { registerAllMiddleware } from './api/middleware/index.js';
@@ -136,6 +137,7 @@ async function main(): Promise<void> {
   const collabService = new CollabService(collabManager);
   const experimentService = new ExperimentService(experimentEngine, profileManager);
   const metricsService = new MetricsService();
+  const chatService = new ChatService(mistralClient);
 
   // Decorate Fastify with services
   (app as any).projectService = projectService;
@@ -146,6 +148,7 @@ async function main(): Promise<void> {
   (app as any).collabService = collabService;
   (app as any).experimentService = experimentService;
   (app as any).metricsService = metricsService;
+  (app as any).chatService = chatService;
   (app as any).agentRouter = agentRouter;
 
   // -----------------------------------------------------------------------

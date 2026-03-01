@@ -1,7 +1,5 @@
 {
-  "/editor/[projectId]/page": "app/editor/[projectId]/page.js",
   "/page": "app/page.js",
-  "/profile/page": "app/profile/page.js",
   "/projects/page": "app/projects/page.js",
-  "/experiments/page": "app/experiments/page.js"
+  "/editor/[projectId]/page": "app/editor/[projectId]/page.js"
 }

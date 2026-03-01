@@ -651,6 +651,52 @@ export async function registerMetricsRoutes(app: FastifyInstance): Promise<void>
   });
 }
 
+// ---------------------------------------------------------------------------
+// Chat routes — Mistral-powered conversational editing
+// ---------------------------------------------------------------------------
+export async function registerChatRoutes(app: FastifyInstance): Promise<void> {
+  // POST /api/v1/chat — send a message, get AI response + editing operations
+  app.post('/api/v1/chat', async (req: FastifyRequest, reply: FastifyReply) => {
+    const body = req.body as {
+      conversationId?: string;
+      message: string;
+      videoDurationMs?: number;
+      platform?: string;
+    };
+
+    if (!body.message) {
+      return reply.status(400).send({ error: 'message is required' });
+    }
+
+    const chatService = (app as any).chatService;
+    if (!chatService) {
+      return reply.status(503).send({ error: 'Chat service unavailable' });
+    }
+
+    const conversationId = body.conversationId ?? (req as any).creatorId ?? 'default';
+
+    try {
+      const result = await chatService.chat(conversationId, body.message, {
+        videoDurationMs: body.videoDurationMs,
+        platform: body.platform,
+      });
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message ?? 'Chat failed' });
+    }
+  });
+
+  // DELETE /api/v1/chat/:conversationId — clear conversation history
+  app.delete('/api/v1/chat/:conversationId', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { conversationId } = req.params as { conversationId: string };
+    const chatService = (app as any).chatService;
+    if (chatService) {
+      chatService.clearConversation(conversationId);
+    }
+    return reply.send({ cleared: true });
+  });
+}
+
 export async function registerAllRoutes(app: FastifyInstance): Promise<void> {
   await registerHealthRoutes(app);
   await registerProjectRoutes(app);
@@ -661,4 +707,5 @@ export async function registerAllRoutes(app: FastifyInstance): Promise<void> {
   await registerExperimentRoutes(app);
   await registerCollabRoutes(app);
   await registerMetricsRoutes(app);
+  await registerChatRoutes(app);
 }
