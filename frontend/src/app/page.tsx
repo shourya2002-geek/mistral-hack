@@ -59,7 +59,7 @@ export default function DashboardPage() {
     if (demoCreating) return;
     setDemoCreating(true);
     try {
-      const proj = await api.createProject({ name: 'My Cinematic Short 🎬' });
+      const proj = await api.createProject({ name: 'Project A' });
       router.push(`/editor/${proj.id}?demo=1`);
     } catch {
       // Fallback: use a fixed demo project id

@@ -23,6 +23,7 @@ export type DemoStepType =
   | 'send-chat'
   | 'wait'
   | 'simulate-upload'
+  | 'start-session'
   | 'play-video'
   | 'pause-video'
   | 'toggle-preview'
@@ -147,7 +148,10 @@ export const DEMO_STEPS: DemoStep[] = [
   // 1. Simulate video upload (fake progress bar for realism)
   { type: 'simulate-upload', delay: 1000, duration: 2500 },
 
-  // 2. Switch to AI Chat
+  // 2. Start an editing session
+  { type: 'start-session', delay: 1200 },
+
+  // 3. Switch to AI Chat
   { type: 'switch-tab', delay: 1200, tab: 'ai-chat' },
 
   // 3. Type first prompt

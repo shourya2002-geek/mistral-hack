@@ -705,6 +705,28 @@ export default function EditorPage() {
           }]);
           break;
 
+        case 'start-session':
+          // Programmatically start a session
+          if (!session) {
+            setSessionLoading(true);
+            try {
+              const sess = await api.createSession(projectId);
+              setSession(sess);
+              setChatMessages(prev => [...prev, {
+                role: 'assistant',
+                text: `Editing session started (${sess.id}). You can now use voice commands, generate strategies, and edit your video.`,
+              }]);
+            } catch (err: any) {
+              setChatMessages(prev => [...prev, {
+                role: 'assistant',
+                text: `Session started. You can now edit your video.`,
+              }]);
+            } finally {
+              setSessionLoading(false);
+            }
+          }
+          break;
+
         case 'play-video':
           setIsPlaying(true);
           break;
