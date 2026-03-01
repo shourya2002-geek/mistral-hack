@@ -111,6 +111,7 @@ export default function EditorPage() {
   const [demoRunning, setDemoRunning] = useState(false);
   const [demoStepIndex, setDemoStepIndex] = useState(-1);
   const demoAbortRef = useRef(false);
+  const demoUploadDoneRef = useRef(false);
   const runDemoRef = useRef<() => Promise<void>>();
 
   // Load connected accounts when share modal opens
@@ -290,6 +291,8 @@ export default function EditorPage() {
         ...prev,
         { role: 'assistant', text: `Video "${file.name}" uploaded successfully (${(file.size / 1024 / 1024).toFixed(1)} MB). You can now generate an editing strategy!` },
       ]);
+      // Signal the demo engine that the real upload finished
+      if (demoRunning) demoUploadDoneRef.current = true;
     } catch (err: any) {
       setUploadError(err.message);
       setUploadProgress(null);
@@ -704,6 +707,25 @@ export default function EditorPage() {
             role: 'assistant',
             text: 'Video uploaded successfully! You can now describe what you want — I\'ll edit it for you.',
           }]);
+          break;
+
+        case 'trigger-upload':
+          // Programmatically click the file input to open the native file picker
+          fileInputRef.current?.click();
+          // Pause demo and wait until real upload completes (isUploaded becomes true)
+          await new Promise<void>((resolve) => {
+            const check = () => {
+              if (demoAbortRef.current) { resolve(); return; }
+              // Poll a ref/flag — we set demoUploadDoneRef from the upload handler
+              if (demoUploadDoneRef.current) {
+                demoUploadDoneRef.current = false;
+                resolve();
+                return;
+              }
+              setTimeout(check, 300);
+            };
+            check();
+          });
           break;
 
         case 'start-session':

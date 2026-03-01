@@ -23,6 +23,7 @@ export type DemoStepType =
   | 'send-chat'
   | 'wait'
   | 'simulate-upload'
+  | 'trigger-upload'
   | 'start-session'
   | 'play-video'
   | 'pause-video'
@@ -145,8 +146,8 @@ const RESPONSE_SPEED: DemoAIResponse = {
 // Full demo sequence
 // ---------------------------------------------------------------------------
 export const DEMO_STEPS: DemoStep[] = [
-  // 1. Simulate video upload (fake progress bar for realism)
-  { type: 'simulate-upload', delay: 1000, duration: 2500 },
+  // 1. Open the real file picker so user can upload their own video
+  { type: 'trigger-upload', delay: 1000 },
 
   // 2. Start an editing session
   { type: 'start-session', delay: 1200 },
