@@ -125,7 +125,7 @@ export default function ProfilePage() {
             V
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold">VIRCUT Creator</h2>
+            <h2 className="text-xl font-bold">EditOS Creator</h2>
             <p className="text-sm text-white/40 mt-0.5">Creator ID: dev-creator</p>
             <div className="flex flex-wrap gap-2 mt-3">
               <span className="badge-brand">AI-Enhanced</span>

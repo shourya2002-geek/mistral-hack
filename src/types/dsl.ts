@@ -1,5 +1,5 @@
 // ============================================================================
-// VIRCUT ENGINE — EDITING DSL TYPE DEFINITIONS
+// EditOS — EDITING DSL TYPE DEFINITIONS
 // ============================================================================
 
 import type { TimeRange, AspectRatio, Platform, EmotionalTone } from './core.js';

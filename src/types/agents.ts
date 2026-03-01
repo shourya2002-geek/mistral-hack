@@ -1,5 +1,5 @@
 // ============================================================================
-// VIRCUT ENGINE — AGENT TYPE DEFINITIONS
+// EditOS — AGENT TYPE DEFINITIONS
 // ============================================================================
 
 import type { Platform, EmotionalTone, ContentVertical } from './core.js';

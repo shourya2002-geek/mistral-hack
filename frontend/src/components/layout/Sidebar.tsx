@@ -87,7 +87,7 @@ export function Sidebar() {
             <Zap className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-tight text-white">VIRCUT</h1>
+            <h1 className="text-lg font-bold tracking-tight text-white">EditOS</h1>
             <p className="text-[10px] font-medium tracking-widest text-brand-300 uppercase">Engine</p>
           </div>
         </div>

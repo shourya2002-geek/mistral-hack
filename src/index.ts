@@ -1,5 +1,5 @@
 // ============================================================================
-// VIRCUT ENGINE — MAIN ENTRY POINT
+// EditOS — MAIN ENTRY POINT
 // ============================================================================
 // Production server bootstrap:
 //   1. Load config
@@ -217,7 +217,7 @@ async function main(): Promise<void> {
   const port = config.port;
 
   await app.listen({ host, port });
-  app.log.info(`🎬 VIRCUT ENGINE running at http://${host}:${port}`);
+  app.log.info(`🎬 EditOS running at http://${host}:${port}`);
   app.log.info(`   Voice WebSocket:  ws://${host}:${port}/ws/voice`);
   app.log.info(`   Collab WebSocket: ws://${host}:${port}/ws/collab`);
   app.log.info(`   Render WebSocket: ws://${host}:${port}/ws/render`);

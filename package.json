@@ -1,5 +1,5 @@
 {
-  "name": "vircut-engine",
+  "name": "editos-engine",
   "version": "1.0.0",
   "description": "Production-grade voice-enabled agentic AI video editor",
   "main": "dist/index.js",

@@ -81,7 +81,7 @@ export default function EditorPage() {
 
   // AI Chat
   const [chatMessages, setChatMessages] = useState<Array<{ role: string; text: string }>>([
-    { role: 'assistant', text: 'Hi! I\'m your VIRCUT AI editor powered by Mistral. Tell me what you want to do with your video — I\'ll edit it for you. Try: "cut the first 3 seconds" or "add captions" or "make it cinematic".' },
+    { role: 'assistant', text: 'Hi! I\'m your EditOS AI editor powered by Mistral. Tell me what you want to do with your video — I\'ll edit it for you. Try: "cut the first 3 seconds" or "add captions" or "make it cinematic".' },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [conversationId] = useState(() => `conv_${Date.now()}`);

@@ -63,7 +63,7 @@ export default function DashboardPage() {
             <span className="badge-brand">AI-Powered</span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight mb-2">
-            Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-300 to-accent-cyan">VIRCUT Engine</span>
+            Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-300 to-accent-cyan">EditOS</span>
           </h1>
           <p className="text-white/50 max-w-2xl text-sm leading-relaxed">
             Production-grade voice-enabled agentic AI video editor. Upload a video, describe your vision,

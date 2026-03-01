@@ -4,7 +4,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 
 export const metadata: Metadata = {
-  title: 'VIRCUT — AI Video Editor',
+  title: 'EditOS — AI Video Editor',
   description: 'Production-grade voice-enabled agentic AI video editor',
   icons: { icon: '/favicon.ico' },
 };

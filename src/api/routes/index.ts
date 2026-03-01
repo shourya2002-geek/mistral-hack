@@ -1,7 +1,7 @@
 // ============================================================================
 // STEP 9 — PRODUCTION BACKEND: API ROUTES
 // ============================================================================
-// RESTful + WebSocket API surface for the VIRCUT ENGINE.
+// RESTful + WebSocket API surface for EditOS.
 //
 // Route groups:
 //   /api/v1/projects    — Project CRUD, upload, render

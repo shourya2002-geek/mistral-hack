@@ -1,5 +1,5 @@
 // ============================================================================
-// API Client — communicates with the VIRCUT backend via Next.js rewrites
+// API Client — communicates with the EditOS backend via Next.js rewrites
 // ============================================================================
 
 const API_BASE = '/api/v1';
