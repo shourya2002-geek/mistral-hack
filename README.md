@@ -1,6 +1,6 @@
 # EditOS — AI Video Editor
 
-Production-grade voice-enabled agentic AI video editor powered by [Mistral AI](https://mistral.ai). Edit videos through natural language — type or speak commands like *"make it cinematic"*, *"cut the last 5 seconds"*, or *"speed up the middle"* and watch the edits happen instantly.
+The Agentic Operating System for Creators on the Move. Upload your content, describe your vision out loud, and let intelligent agents craft a polished, short-form edit in seconds — then publish directly to your favourite platforms, all from wherever you are. Powered by [Mistral AI](https://mistral.ai).
 
 ---
 

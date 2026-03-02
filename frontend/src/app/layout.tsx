@@ -5,7 +5,7 @@ import { Header } from '@/components/layout/Header';
 
 export const metadata: Metadata = {
   title: 'EditOS — AI Video Editor',
-  description: 'Production-grade voice-enabled agentic AI video editor',
+  description: 'The Agentic Operating System for Creators on the Move. Upload your content, describe your vision out loud, and let intelligent agents craft a polished, short-form edit in seconds.',
   icons: { icon: '/favicon.ico' },
 };
 

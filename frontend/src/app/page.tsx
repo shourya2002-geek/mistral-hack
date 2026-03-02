@@ -116,8 +116,9 @@ export default function DashboardPage() {
             Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-300 to-accent-cyan">EditOS</span>
           </h1>
           <p className="text-white/50 max-w-2xl text-sm leading-relaxed">
-            Production-grade voice-enabled agentic AI video editor. Upload a video, describe your vision,
-            and let our AI agents craft a professional edit with the instincts of a top 1% short-form editor.
+            The Agentic Operating System for Creators on the Move. Upload your content, describe your vision out loud,
+            and let intelligent agents craft a polished, short-form edit in seconds — then publish directly to your
+            favourite platforms, all from wherever you are.
           </p>
           <div className="flex gap-3 mt-6 items-center">
             <Link href="/projects" className="btn-primary">
