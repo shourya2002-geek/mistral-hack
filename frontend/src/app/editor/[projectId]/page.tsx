@@ -116,7 +116,6 @@ export default function EditorPage() {
   // Demo voice simulation (no real mic needed)
   const [demoVoiceListening, setDemoVoiceListening] = useState(false);
   const [demoTranscript, setDemoTranscript] = useState('');
-  const [demoVoicePrompt, setDemoVoicePrompt] = useState('');
 
   // Load connected accounts when share modal opens
   useEffect(() => {
@@ -762,27 +761,17 @@ export default function EditorPage() {
           break;
 
         case 'voice-command': {
-          // Show the prompt hint so presenter knows what to say
-          if (step.voicePrompt) setDemoVoicePrompt(step.voicePrompt);
-          // Use live mic via Web Speech API
+          // Use live mic via Web Speech API — user speaks freely
           const transcript = await listenForSpeech(
             (interim) => setDemoTranscript(interim),
             () => demoAbortRef.current,
           );
-          if (demoAbortRef.current) { setDemoVoicePrompt(''); break; }
-          const finalText = transcript.trim() || step.voicePrompt?.replace(/^Say:\s*"/i, '').replace(/"$/, '') || 'voice command';
-          // Add user message (voice command) to chat
-          setChatMessages(prev => [...prev, { role: 'user', text: `🎙️ ${finalText}` }]);
+          if (demoAbortRef.current) { break; }
+          const finalText = transcript.trim();
+          if (!finalText) break; // nothing captured
           setDemoTranscript('');
-          setDemoVoicePrompt('');
-          // Process the pre-scripted response
-          if (step.response) {
-            setGenerating(true);
-            await wait(1200);
-            if (demoAbortRef.current) { setGenerating(false); break; }
-            setGenerating(false);
-            applyDemoResponse(step.response);
-          }
+          // Send to real Mistral AI (same path as typed chat)
+          await sendToAI(`🎙️ ${finalText}`);
           break;
         }
 
@@ -1843,10 +1832,6 @@ export default function EditorPage() {
                             ))}
                           </div>
                         </div>
-                        {/* Voice prompt hint for presenter */}
-                        {demoVoicePrompt && (
-                          <p className="text-[11px] text-brand-300/80 italic">{demoVoicePrompt}</p>
-                        )}
                         {activeTranscript && (
                           <p className="text-xs text-white/80 leading-relaxed">{activeTranscript}</p>
                         )}

@@ -55,8 +55,6 @@ export interface DemoStep {
   platform?: string;
   /** For wait — duration ms */
   duration?: number;
-  /** For voice-command — hint shown to the presenter so they know what to say */
-  voicePrompt?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,48 +175,17 @@ export const DEMO_STEPS: DemoStep[] = [
   // 4. Start voice mode
   { type: 'start-voice', delay: 800 },
 
-  // 5. Voice command 1 — cinematic treatment (user speaks live)
-  {
-    type: 'voice-command',
-    delay: 1200,
-    voicePrompt: 'Say: "make it cinematic with dramatic zoom and bold captions"',
-    response: RESPONSE_CINEMATIC,
-  },
-
-  // 6. Wait for user to see the edits on timeline
+  // 5–8. Four voice commands — user speaks freely, real AI processes each
+  { type: 'voice-command', delay: 1200 },
   { type: 'wait', delay: 3000, duration: 3000 },
 
-  // 7. Voice command 2 — cut + fade (user speaks live)
-  {
-    type: 'voice-command',
-    delay: 800,
-    voicePrompt: 'Say: "cut the first 3 seconds and add a fade in"',
-    response: RESPONSE_CUT_FADE,
-  },
-
-  // 8. Wait
+  { type: 'voice-command', delay: 800 },
   { type: 'wait', delay: 2500, duration: 2500 },
 
-  // 9. Voice command 3 — speed ramp (user speaks live)
-  {
-    type: 'voice-command',
-    delay: 800,
-    voicePrompt: 'Say: "speed up the middle section to 1.5x"',
-    response: RESPONSE_SPEED,
-  },
-
-  // 10. Wait
+  { type: 'voice-command', delay: 800 },
   { type: 'wait', delay: 2500, duration: 2500 },
 
-  // 11. Voice command 4 — ending zoom (user speaks live)
-  {
-    type: 'voice-command',
-    delay: 800,
-    voicePrompt: 'Say: "add a slow zoom on the ending"',
-    response: RESPONSE_VOICE_ZOOM,
-  },
-
-  // 12. Wait
+  { type: 'voice-command', delay: 800 },
   { type: 'wait', delay: 2000, duration: 2000 },
 
   // 13. Stop voice mode
