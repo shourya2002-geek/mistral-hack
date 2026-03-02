@@ -787,7 +787,7 @@ export default function EditorPage() {
           break;
 
         case 'voice-command': {
-          // Show hint of what to say (only if showHint), listen via mic, send deterministic text to AI
+          // Show hint of what to say (only if showHint), listen via mic, apply deterministic response
           const deterministic = step.text ?? '';
           if (step.showHint) setDemoVoiceHint(deterministic);
           const transcript = await listenForSpeech(
@@ -797,9 +797,14 @@ export default function EditorPage() {
           setDemoVoiceHint('');
           setDemoTranscript('');
           if (demoAbortRef.current) { break; }
-          // Send the pre-scripted deterministic text (not the transcript) to real Mistral AI
+          // Show the user message in chat, then apply the hardcoded response (no API call)
           if (deterministic) {
-            await sendToAI(`🎙️ ${deterministic}`);
+            setChatMessages(prev => [...prev, { role: 'user', text: `🎙️ ${deterministic}` }]);
+            if (step.response) {
+              applyDemoResponse(step.response);
+            } else {
+              await sendToAI(`🎙️ ${deterministic}`);
+            }
           }
           break;
         }

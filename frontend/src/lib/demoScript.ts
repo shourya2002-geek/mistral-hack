@@ -116,20 +116,20 @@ const RESPONSE_CINEMATIC: DemoAIResponse = {
 };
 
 const RESPONSE_CUT_FADE: DemoAIResponse = {
-  message: 'Trimmed the first 3 seconds and added a clean fade in. Your video now starts with impact. ✂️',
+  message: 'Trimmed last 5s and added a smooth fade-in at the end. Clean finish! ✂️',
   operations: [
     {
       type: 'cut',
-      startMs: 0,
-      endMs: 3000,
-      description: 'Cut first 3 seconds',
+      startMs: 25000,
+      endMs: 30000,
+      description: 'Cut last 5 seconds',
     },
     {
       type: 'fade_in',
-      startMs: 3000,
-      endMs: 4500,
-      params: { durationMs: 1500 },
-      description: 'Fade in after cut',
+      startMs: 0,
+      endMs: 1000,
+      params: { durationMs: 1000 },
+      description: 'Fade in at start',
     },
   ],
   strategyName: 'trim_and_fade',
@@ -179,26 +179,26 @@ export const DEMO_STEPS: DemoStep[] = [
   // 4. Start voice mode
   { type: 'start-voice', delay: 800 },
 
-  // 5. First voice command — hint shown, user speaks, deterministic text sent to real AI
-  { type: 'voice-command', delay: 500, text: 'make it cinematic with dramatic zoom', showHint: true },
+  // 5. First voice command — hint shown, user speaks, deterministic response applied
+  { type: 'voice-command', delay: 500, text: 'make it cinematic with dramatic zoom', showHint: true, response: RESPONSE_CINEMATIC },
 
   // 6. Wait for AI to process
   { type: 'wait', delay: 2000, duration: 2000 },
 
   // 7. Second voice command (no hint)
-  { type: 'voice-command', delay: 300, text: 'cut the last 5 seconds and add a fade in at the end' },
+  { type: 'voice-command', delay: 300, text: 'cut the last 5 seconds and add a fade in at the end', response: RESPONSE_CUT_FADE },
 
   // 8. Wait
   { type: 'wait', delay: 2000, duration: 2000 },
 
   // 9. Third voice command (no hint)
-  { type: 'voice-command', delay: 300, text: 'speed up the middle section to 1.5x' },
+  { type: 'voice-command', delay: 300, text: 'speed up the middle section to 1.5x', response: RESPONSE_SPEED },
 
   // 10. Wait
   { type: 'wait', delay: 2000, duration: 2000 },
 
   // 11. Fourth voice command (no hint)
-  { type: 'voice-command', delay: 300, text: 'add a slow zoom on the ending' },
+  { type: 'voice-command', delay: 300, text: 'add a slow zoom on the ending', response: RESPONSE_VOICE_ZOOM },
 
   // 12. Stop voice mode
   { type: 'stop-voice', delay: 500 },
