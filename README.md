@@ -359,6 +359,3 @@ All REST endpoints are prefixed with `/api/v1`. The backend also exposes WebSock
 
 ---
 
-## License
-
-MIT
