@@ -22,7 +22,8 @@ export function useWebSocket(path: string) {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//localhost:3000${path}`;
+    const backendHost = process.env.NEXT_PUBLIC_BACKEND_HOST || 'localhost:3000';
+    const wsUrl = `${protocol}//${backendHost}${path}`;
 
     setStatus('connecting');
     const ws = new WebSocket(wsUrl);

@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: editos-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: HOST
+        value: 0.0.0.0
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: MISTRAL_ORCHESTRATOR_MODEL
+        value: mistral-large-latest
+      - key: MISTRAL_INTENT_MODEL
+        value: ministral-8b-latest
+      - key: MISTRAL_STRATEGY_MODEL
+        value: ministral-8b-latest
+      - key: MISTRAL_COLLAB_MODEL
+        value: ministral-8b-latest
+      - key: MISTRAL_PUBLISH_MODEL
+        value: ministral-3b-latest
+      - key: MISTRAL_VOICE_MODEL
+        value: mistral-large-latest
+      - key: REDIS_HOST
+        fromService:
+          name: editos-redis
+          type: redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          name: editos-redis
+          type: redis
+          property: port
+      - key: REDIS_PASSWORD
+        fromService:
+          name: editos-redis
+          type: redis
+          property: password
+      - key: CORS_ORIGIN
+        sync: false
+      - key: CUSTOM_ASR_ENABLED
+        value: false
+      - key: UPLOAD_DIR
+        value: /app/storage/uploads
+      - key: TEMP_DIR
+        value: /app/storage/temp
+      - key: OUTPUT_DIR
+        value: /app/storage/output
+    disk:
+      name: editos-storage
+      mountPath: /app/storage
+      sizeGB: 10
+
+databases:
+  - name: editos-redis
+    plan: starter
